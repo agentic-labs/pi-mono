@@ -188,8 +188,9 @@ class PiComputerUse(BaseInstalledAgent):
             if val:
                 env[key] = val
 
+        model = self.model_name.split("/", 1)[1]
         model_args = (
-            f"--provider {provider} --model {self.model_name.split('/', 1)[1]} "
+            f"--provider {shlex.quote(provider)} --model {shlex.quote(model)} "
         )
 
         cli_flags = self.build_cli_flags()

@@ -270,7 +270,7 @@ async function captureScreenshot(
 ): Promise<DriverScreenshot> {
 	const path = screenshotPath(toolCallId);
 	await execOrThrow(pi, "scrot", ["--overwrite", path], ctx, 20000, true, state);
-	const base64 = await execOrThrow(pi, "bash", ["-lc", `base64 -w 0 ${JSON.stringify(path)}`], ctx, 20000);
+	const base64 = await execOrThrow(pi, "bash", ["-lc", `base64 -w 0 ${shellEscape(path)}`], ctx, 20000);
 	return {
 		path,
 		image: {
@@ -339,7 +339,6 @@ async function executeAction(
 	toolCallId: string,
 	action: ComputerAction,
 ): Promise<DriverScreenshot | undefined> {
-	const isScreenshot = action.type === "screenshot";
 	switch (action.type) {
 		case "screenshot":
 			return captureScreenshot(pi, state, ctx, toolCallId);
@@ -522,14 +521,22 @@ async function executeAction(
 			);
 			break;
 		case "hold_key":
-			await execOrThrow(pi, "xdotool", ["keydown", normalizeKey(action.key)], ctx, 15000, true, state);
-			await sleep(Math.round((action.duration ?? DEFAULT_HOLD_KEY_DURATION_SECONDS) * 1000));
-			await execOrThrow(pi, "xdotool", ["keyup", normalizeKey(action.key)], ctx, 15000, true, state);
+			{
+				const key = normalizeKey(action.key);
+				let keyDown = false;
+				try {
+					await execOrThrow(pi, "xdotool", ["keydown", key], ctx, 15000, true, state);
+					keyDown = true;
+					await sleep(Math.round((action.duration ?? DEFAULT_HOLD_KEY_DURATION_SECONDS) * 1000));
+				} finally {
+					if (keyDown) {
+						await execOrThrow(pi, "xdotool", ["keyup", key], ctx, 15000, true, state);
+					}
+				}
+			}
 			break;
 	}
-	if (!isScreenshot) {
-		await sleep(state.config.actionDelayMs);
-	}
+	await sleep(state.config.actionDelayMs);
 	return undefined;
 }
 
