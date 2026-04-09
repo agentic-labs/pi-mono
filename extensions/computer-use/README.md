@@ -45,9 +45,8 @@ OpenAI:
 OPENAI_API_KEY=... \
 PI_COMPUTER_USE_ENABLED=1 \
 DISPLAY=:99 \
-pi --print --mode json --no-session --no-tools --no-extensions \
+pi --print --mode json --no-tools \
   -e ./extensions/computer-use/index.ts \
-  --no-skills --no-prompt-templates --no-themes \
   --provider openai-computer --model gpt-5.4 \
   "Open Firefox and take a screenshot."
 ```
@@ -58,9 +57,8 @@ Anthropic:
 ANTHROPIC_API_KEY=... \
 PI_COMPUTER_USE_ENABLED=1 \
 DISPLAY=:99 \
-pi --print --mode json --no-session --no-tools --no-extensions \
+pi --print --mode json --no-tools \
   -e ./extensions/computer-use/index.ts \
-  --no-skills --no-prompt-templates --no-themes \
   --provider anthropic-computer --model claude-sonnet-4-5 \
   "Open Firefox and take a screenshot."
 ```
@@ -75,11 +73,7 @@ The Harbor wrapper:
 - loads this extension explicitly with `-e`
 - launches pi with:
   - `--no-tools`
-  - `--no-extensions`
-  - `--no-skills`
-  - `--no-prompt-templates`
-  - `--no-themes`
-  - `--no-session`
+  - `--extension "$EXT_PATH"`
 
 Suggested import path:
 

@@ -137,8 +137,8 @@ class PiComputerUse(BaseInstalledAgent):
                 "OPENBOX_PID=$!; "
                 "trap 'kill $OPENBOX_PID $XVFB_PID 2>/dev/null || true' EXIT; "
                 "sleep 1; "
-                f"pi --print --mode json --no-session --no-tools --no-extensions "
-                f'--extension "$EXT_PATH" --no-skills --no-prompt-templates --no-themes '
+                f"pi --print --mode json --no-tools "
+                f'--extension "$EXT_PATH" '
                 f"--provider {shlex.quote(provider)} --model {shlex.quote(model_id)} "
                 f"{cli_flags}"
                 f"{escaped_instruction} "
