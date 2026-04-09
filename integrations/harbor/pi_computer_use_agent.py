@@ -76,7 +76,7 @@ class PiComputerUse(BaseInstalledAgent):
         if os.environ.get("OPENAI_API_KEY"):
             return "openai", "gpt-5.4"
         if os.environ.get("ANTHROPIC_OAUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY"):
-            return "anthropic", "claude-sonnet-4-5"
+            return "anthropic", "claude-sonnet-4-6"
         raise ValueError("No supported API credentials found for openai or anthropic computer use.")
 
     def _build_env(self, provider: str) -> dict[str, str]:

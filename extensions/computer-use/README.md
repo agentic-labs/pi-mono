@@ -59,7 +59,7 @@ PI_COMPUTER_USE_ENABLED=1 \
 DISPLAY=:99 \
 pi --print --mode json --no-tools \
   -e ./extensions/computer-use/index.ts \
-  --provider anthropic --model claude-sonnet-4-5 \
+  --provider anthropic --model claude-sonnet-4-6 \
   "Open Firefox and take a screenshot."
 ```
 
