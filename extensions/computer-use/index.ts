@@ -783,6 +783,77 @@ function toOpenAIInputImage(image: ImageContent): OpenAIInputItem {
 	return { type: "input_image", detail: "original", image_url: `${SCREENSHOT_DATA_PREFIX}${image.data}` };
 }
 
+function openAIReplayId(prefix: string, index: number): string {
+	return `${prefix}_${index}`;
+}
+
+function toOpenAIComputerActions(actions: ComputerAction[]): OpenAIComputerAction[] {
+	return actions.map((action): OpenAIComputerAction => {
+		switch (action.type) {
+			case "screenshot":
+				return { type: "screenshot" };
+			case "click":
+				return {
+					type: "click",
+					x: action.x,
+					y: action.y,
+					button: action.button === "right" ? "right" : action.button === "middle" ? "wheel" : "left",
+					keys: action.modifiers,
+				};
+			case "double_click":
+				return {
+					type: "double_click",
+					x: action.x,
+					y: action.y,
+					keys: action.modifiers,
+				};
+			case "drag":
+				return {
+					type: "drag",
+					path: action.path,
+					keys: action.modifiers,
+				};
+			case "move":
+				return {
+					type: "move",
+					x: action.x,
+					y: action.y,
+					keys: action.modifiers,
+				};
+			case "scroll":
+				return {
+					type: "scroll",
+					x: action.x,
+					y: action.y,
+					scroll_x: action.scrollX,
+					scroll_y: action.scrollY,
+					keys: action.modifiers,
+				};
+			case "type":
+				return {
+					type: "type",
+					text: action.text,
+				};
+			case "keypress":
+				return {
+					type: "keypress",
+					keys: action.keys,
+				};
+			case "wait":
+				return {
+					type: "wait",
+				};
+			case "mouse_down":
+			case "mouse_up":
+			case "hold_key":
+				return {
+					type: "keypress",
+					keys: [],
+				};
+		}
+	});
+}
+
 function openAIMessageInput(messages: Message[], previousResponseId?: string): OpenAIInputItem[] {
 	if (previousResponseId) {
 		const last = messages[messages.length - 1];
@@ -817,20 +888,71 @@ function openAIMessageInput(messages: Message[], previousResponseId?: string): O
 		}
 	}
 
+	let itemIndex = 0;
 	return messages.flatMap((message): OpenAIInputItem[] => {
 		if (message.role === "user") {
 			if (typeof message.content === "string") {
-				return [{ type: "message", role: "user", content: [toOpenAIInputText(message.content)] }];
+				return [
+					{
+						id: openAIReplayId("msg", itemIndex++),
+						type: "message",
+						role: "user",
+						content: [toOpenAIInputText(message.content)],
+					},
+				];
 			}
 			return [
 				{
+					id: openAIReplayId("msg", itemIndex++),
 					type: "message",
 					role: "user",
 					content: message.content.map((item) => (item.type === "text" ? toOpenAIInputText(item.text) : toOpenAIInputImage(item))),
 				},
 			];
 		}
-		return [];
+
+		if (message.role === "assistant") {
+			const items: OpenAIInputItem[] = [];
+			for (const content of message.content) {
+				if (content.type === "text" && content.text.trim().length > 0) {
+					items.push({
+						id: openAIReplayId("msg", itemIndex++),
+						type: "message",
+						role: "assistant",
+						status: "completed",
+						content: [{ type: "output_text", text: sanitizeSurrogates(content.text) }],
+					});
+				} else if (content.type === "toolCall" && content.name === COMPUTER_TOOL_NAME) {
+					const params = prepareComputerArguments(content.arguments);
+					items.push({
+						id: openAIReplayId("cc", itemIndex++),
+						type: "computer_call",
+						call_id: content.id,
+						status: "completed",
+						pending_safety_checks: [],
+						actions: toOpenAIComputerActions(params.actions),
+					});
+				}
+			}
+			return items;
+		}
+
+		const image = message.content.find((item): item is ImageContent => item.type === "image");
+		if (!image) {
+			return [];
+		}
+		return [
+			{
+				id: openAIReplayId("cco", itemIndex++),
+				type: "computer_call_output",
+				call_id: message.toolCallId,
+				status: "completed",
+				output: {
+					type: "computer_screenshot",
+					image_url: `${SCREENSHOT_DATA_PREFIX}${image.data}`,
+				},
+			},
+		];
 	});
 }
 
