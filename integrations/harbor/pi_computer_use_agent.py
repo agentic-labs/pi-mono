@@ -164,12 +164,27 @@ class PiComputerUse(BaseInstalledAgent):
             environment,
             command=(
                 f". ~/.nvm/nvm.sh; "
-                "Xvfb :99 -screen 0 1440x900x24 >/tmp/pi-computer-use-xvfb.log 2>&1 & "
+                'export DISPLAY="${PI_COMPUTER_USE_DISPLAY:-:99}"; '
+                "STARTED_XVFB=0; "
+                "STARTED_OPENBOX=0; "
+                "if ! xdotool getdisplaygeometry >/dev/null 2>&1; then "
+                'Xvfb "$DISPLAY" -screen 0 1440x900x24 >/tmp/pi-computer-use-xvfb.log 2>&1 & '
                 "XVFB_PID=$!; "
+                "STARTED_XVFB=1; "
+                "sleep 1; "
+                "fi; "
+                'if ! xdotool getdisplaygeometry >/dev/null 2>&1; then echo "Failed to initialize X display $DISPLAY" >&2; exit 1; fi; '
+                "if ! pgrep -x openbox >/dev/null 2>&1; then "
                 "openbox >/tmp/pi-computer-use-openbox.log 2>&1 & "
                 "OPENBOX_PID=$!; "
-                "trap 'kill $OPENBOX_PID $XVFB_PID 2>/dev/null || true' EXIT; "
+                "STARTED_OPENBOX=1; "
                 "sleep 1; "
+                "fi; "
+                'cleanup() { '
+                'if [ "${STARTED_OPENBOX:-0}" = "1" ]; then kill "$OPENBOX_PID" 2>/dev/null || true; fi; '
+                'if [ "${STARTED_XVFB:-0}" = "1" ]; then kill "$XVFB_PID" 2>/dev/null || true; fi; '
+                "}; "
+                "trap cleanup EXIT; "
                 f"pi --print --mode json --no-session --no-tools "
                 f'--extension "{self._INSTALLED_EXTENSION_PATH}" '
                 f"{model_args}"

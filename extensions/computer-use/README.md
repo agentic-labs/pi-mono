@@ -62,7 +62,8 @@ The Harbor wrapper:
 
 - installs pi
 - installs the required X11 tooling
-- starts `Xvfb`
+- reuses an existing `DISPLAY` session when present, otherwise starts `Xvfb`
+- starts `openbox` only when it is not already running
 - downloads this extension from raw GitHub into `~/.pi/agent/extensions/computer-use/index.ts`
 - loads that staged extension explicitly with `-e`
 - uses the `provider/model` Harbor passes to the agent
