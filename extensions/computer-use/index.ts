@@ -303,13 +303,15 @@ async function withModifiers<T>(
 	fn: () => Promise<T>,
 ): Promise<T> {
 	const keys = (modifiers ?? []).map(normalizeModifier);
-	for (const key of keys) {
-		await execOrThrow(pi, "xdotool", ["keydown", key], ctx, 15000, true, state);
-	}
+	const pressedKeys: string[] = [];
 	try {
+		for (const key of keys) {
+			await execOrThrow(pi, "xdotool", ["keydown", key], ctx, 15000, true, state);
+			pressedKeys.push(key);
+		}
 		return await fn();
 	} finally {
-		for (const key of keys.reverse()) {
+		for (const key of pressedKeys.reverse()) {
 			await execOrThrow(pi, "xdotool", ["keyup", key], ctx, 15000, true, state);
 		}
 	}
@@ -486,7 +488,7 @@ async function executeAction(
 			await execOrThrow(
 				pi,
 				"xdotool",
-				["type", "--delay", String(state.config.typingDelayMs), action.text],
+				["type", "--delay", String(state.config.typingDelayMs), "--", action.text],
 				ctx,
 				15000,
 				true,
