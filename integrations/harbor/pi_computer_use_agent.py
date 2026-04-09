@@ -13,9 +13,10 @@ from harbor.models.agent.context import AgentContext
 
 class PiComputerUse(BaseInstalledAgent):
     _OUTPUT_FILENAME = "pi.txt"
-    _SOURCE_EXTENSION_PATH = "./extensions/computer-use/index.ts"
     _INSTALLED_EXTENSION_DIR = "$HOME/.pi/agent/extensions/computer-use"
     _INSTALLED_EXTENSION_PATH = "$HOME/.pi/agent/extensions/computer-use/index.ts"
+    _EXTENSION_REF_ENV = "PI_COMPUTER_USE_EXTENSION_REF"
+    _DEFAULT_EXTENSION_REF = "refs/heads/main"
 
     CLI_FLAGS = [
         CliFlag(
@@ -69,13 +70,18 @@ class PiComputerUse(BaseInstalledAgent):
             f"$HOME/.agents/skills/ 2>/dev/null || true"
         )
 
-    def _build_stage_extension_command(self) -> str:
+    def _build_sync_extension_command(self) -> str:
+        extension_ref = os.environ.get(
+            self._EXTENSION_REF_ENV, self._DEFAULT_EXTENSION_REF
+        )
+        extension_url = (
+            "https://raw.githubusercontent.com/agentic-labs/pi-mono/"
+            f"{extension_ref}/extensions/computer-use/index.ts"
+        )
         return (
-            f'if [ ! -f {shlex.quote(self._SOURCE_EXTENSION_PATH)} ]; then '
-            'echo "computer-use extension not found" >&2; exit 1; '
-            "fi && "
             f'mkdir -p "{self._INSTALLED_EXTENSION_DIR}" && '
-            f'cp {shlex.quote(self._SOURCE_EXTENSION_PATH)} "{self._INSTALLED_EXTENSION_PATH}"'
+            f'curl -fsSL {shlex.quote(extension_url)} '
+            f'-o "{self._INSTALLED_EXTENSION_PATH}"'
         )
 
     @with_prompt_template
@@ -92,12 +98,10 @@ class PiComputerUse(BaseInstalledAgent):
         provider, _ = self.model_name.split("/", 1)
 
         env: dict[str, str] = {
-            "PI_COMPUTER_USE_ENABLED": "1",
             "PI_COMPUTER_USE_DISPLAY": ":99",
             "PI_COMPUTER_USE_DISPLAY_NUMBER": "99",
             "PI_COMPUTER_USE_DISPLAY_WIDTH": "1440",
             "PI_COMPUTER_USE_DISPLAY_HEIGHT": "900",
-            "PI_COMPUTER_USE_REQUIRE_OPT_IN": "1",
         }
         keys: list[str] = []
 
@@ -154,7 +158,7 @@ class PiComputerUse(BaseInstalledAgent):
         skills_command = self._build_register_skills_command()
         if skills_command:
             await self.exec_as_agent(environment, command=skills_command)
-        await self.exec_as_agent(environment, command=self._build_stage_extension_command())
+        await self.exec_as_agent(environment, command=self._build_sync_extension_command())
 
         await self.exec_as_agent(
             environment,

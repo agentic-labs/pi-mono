@@ -62,8 +62,6 @@ interface DriverConfig {
 	actionDelayMs: number;
 	clickDelayMs: number;
 	typingDelayMs: number;
-	requireOptIn: boolean;
-	optInEnvVar: string;
 }
 
 interface DriverState {
@@ -82,11 +80,6 @@ function parsePositiveInt(raw: string | undefined, fallback: number): number {
 	return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
-function parseBoolean(raw: string | undefined, fallback: boolean): boolean {
-	if (raw === undefined) return fallback;
-	return !["0", "false", "no", "off"].includes(raw.toLowerCase());
-}
-
 function getDisplayEnv(displayNumber: number): string {
 	return process.env.PI_COMPUTER_USE_DISPLAY || process.env.DISPLAY || `:${displayNumber}`;
 }
@@ -101,8 +94,6 @@ function getDriverConfig(): DriverConfig {
 		actionDelayMs: parsePositiveInt(process.env.PI_COMPUTER_USE_ACTION_DELAY_MS, DEFAULT_ACTION_DELAY_MS),
 		clickDelayMs: parsePositiveInt(process.env.PI_COMPUTER_USE_CLICK_DELAY_MS, DEFAULT_CLICK_DELAY_MS),
 		typingDelayMs: parsePositiveInt(process.env.PI_COMPUTER_USE_TYPING_DELAY_MS, DEFAULT_TYPING_DELAY_MS),
-		requireOptIn: parseBoolean(process.env.PI_COMPUTER_USE_REQUIRE_OPT_IN, true),
-		optInEnvVar: process.env.PI_COMPUTER_USE_OPT_IN_ENV_VAR || "PI_COMPUTER_USE_ENABLED",
 	};
 }
 
@@ -261,11 +252,6 @@ async function execOrThrow(
 
 async function ensureRuntimeReady(state: DriverState, pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
 	if (state.binariesChecked) return;
-	if (state.config.requireOptIn && process.env[state.config.optInEnvVar] !== "1") {
-		throw new Error(
-			`Computer use is disabled. Set ${state.config.optInEnvVar}=1 inside an isolated VM/container to enable it.`,
-		);
-	}
 	for (const binary of REQUIRED_BINARIES) {
 		await execOrThrow(pi, "bash", ["-lc", `command -v ${binary}`], ctx, 5000);
 	}

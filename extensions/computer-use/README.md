@@ -20,10 +20,7 @@ Single-file pi extension for native computer-use workflows plus a lightweight Ha
 
 ## Required environment
 
-The extension expects:
-
-- `PI_COMPUTER_USE_ENABLED=1`
-- an X11 display via `DISPLAY` or `PI_COMPUTER_USE_DISPLAY`
+The extension expects an X11 display via `DISPLAY` or `PI_COMPUTER_USE_DISPLAY`.
 
 Optional tuning:
 
@@ -34,8 +31,6 @@ Optional tuning:
 - `PI_COMPUTER_USE_ACTION_DELAY_MS`
 - `PI_COMPUTER_USE_CLICK_DELAY_MS`
 - `PI_COMPUTER_USE_TYPING_DELAY_MS`
-- `PI_COMPUTER_USE_REQUIRE_OPT_IN`
-- `PI_COMPUTER_USE_OPT_IN_ENV_VAR`
 
 ## Local usage
 
@@ -43,7 +38,6 @@ OpenAI:
 
 ```bash
 OPENAI_API_KEY=... \
-PI_COMPUTER_USE_ENABLED=1 \
 DISPLAY=:99 \
 pi --print --mode json --no-tools \
   -e ./extensions/computer-use/index.ts \
@@ -55,7 +49,6 @@ Anthropic:
 
 ```bash
 ANTHROPIC_API_KEY=... \
-PI_COMPUTER_USE_ENABLED=1 \
 DISPLAY=:99 \
 pi --print --mode json --no-tools \
   -e ./extensions/computer-use/index.ts \
@@ -70,7 +63,7 @@ The Harbor wrapper:
 - installs pi
 - installs the required X11 tooling
 - starts `Xvfb`
-- stages this extension into `~/.pi/agent/extensions/computer-use/index.ts`
+- downloads this extension from raw GitHub into `~/.pi/agent/extensions/computer-use/index.ts`
 - loads that staged extension explicitly with `-e`
 - uses the `provider/model` Harbor passes to the agent
 - forwards provider-specific credential env vars using the same provider mapping as Harbor's official `pi.py`
@@ -86,6 +79,14 @@ harbor run -d "<dataset@version>" \
   --agent-import-path integrations.harbor:PiComputerUse
 ```
 
+Optional override for the downloaded extension ref:
+
+```bash
+export PI_COMPUTER_USE_EXTENSION_REF=refs/heads/main
+```
+
+Use a commit SHA or another ref if you want to pin a specific extension version.
+
 ## Safety
 
-Use only in an isolated VM or container. The extension intentionally refuses to run until the opt-in env var is set.
+Use only in an isolated VM or container.
