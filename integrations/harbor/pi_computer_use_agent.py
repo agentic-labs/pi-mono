@@ -13,10 +13,9 @@ from harbor.models.agent.context import AgentContext
 
 class PiComputerUse(BaseInstalledAgent):
     _OUTPUT_FILENAME = "pi.txt"
-    _EXTENSION_PATHS = (
-        "./extensions/computer-use/index.ts",
-        "/workspace/extensions/computer-use/index.ts",
-    )
+    _SOURCE_EXTENSION_PATH = "./extensions/computer-use/index.ts"
+    _INSTALLED_EXTENSION_DIR = "$HOME/.pi/agent/extensions/computer-use"
+    _INSTALLED_EXTENSION_PATH = "$HOME/.pi/agent/extensions/computer-use/index.ts"
 
     CLI_FLAGS = [
         CliFlag(
@@ -68,6 +67,15 @@ class PiComputerUse(BaseInstalledAgent):
             f"mkdir -p $HOME/.agents/skills && "
             f"cp -r {shlex.quote(self.skills_dir)}/* "
             f"$HOME/.agents/skills/ 2>/dev/null || true"
+        )
+
+    def _build_stage_extension_command(self) -> str:
+        return (
+            f'if [ ! -f {shlex.quote(self._SOURCE_EXTENSION_PATH)} ]; then '
+            'echo "computer-use extension not found" >&2; exit 1; '
+            "fi && "
+            f'mkdir -p "{self._INSTALLED_EXTENSION_DIR}" && '
+            f'cp {shlex.quote(self._SOURCE_EXTENSION_PATH)} "{self._INSTALLED_EXTENSION_PATH}"'
         )
 
     @with_prompt_template
@@ -146,16 +154,12 @@ class PiComputerUse(BaseInstalledAgent):
         skills_command = self._build_register_skills_command()
         if skills_command:
             await self.exec_as_agent(environment, command=skills_command)
+        await self.exec_as_agent(environment, command=self._build_stage_extension_command())
 
         await self.exec_as_agent(
             environment,
             command=(
                 f". ~/.nvm/nvm.sh; "
-                "EXT_PATH=''; "
-                f"for candidate in {' '.join(shlex.quote(path) for path in self._EXTENSION_PATHS)}; do "
-                'if [ -f "$candidate" ]; then EXT_PATH="$candidate"; break; fi; '
-                "done; "
-                'if [ -z "$EXT_PATH" ]; then echo "computer-use extension not found" >&2; exit 1; fi; '
                 "Xvfb :99 -screen 0 1440x900x24 >/tmp/pi-computer-use-xvfb.log 2>&1 & "
                 "XVFB_PID=$!; "
                 "openbox >/tmp/pi-computer-use-openbox.log 2>&1 & "
@@ -163,7 +167,7 @@ class PiComputerUse(BaseInstalledAgent):
                 "trap 'kill $OPENBOX_PID $XVFB_PID 2>/dev/null || true' EXIT; "
                 "sleep 1; "
                 f"pi --print --mode json --no-session --no-tools "
-                f'--extension "$EXT_PATH" '
+                f'--extension "{self._INSTALLED_EXTENSION_PATH}" '
                 f"{model_args}"
                 f"{cli_flags}"
                 f"{escaped_instruction} "

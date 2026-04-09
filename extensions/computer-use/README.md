@@ -70,7 +70,8 @@ The Harbor wrapper:
 - installs pi
 - installs the required X11 tooling
 - starts `Xvfb`
-- loads this extension explicitly with `-e`
+- stages this extension into `~/.pi/agent/extensions/computer-use/index.ts`
+- loads that staged extension explicitly with `-e`
 - uses the `provider/model` Harbor passes to the agent
 - forwards provider-specific credential env vars using the same provider mapping as Harbor's official `pi.py`
 - launches pi with:
