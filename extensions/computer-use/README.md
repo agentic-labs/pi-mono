@@ -12,7 +12,7 @@ Single-file pi extension for native computer-use workflows plus a lightweight Ha
 - Registers a `computer` tool that drives an isolated Linux/X11 desktop with:
   - `scrot`
   - `xdotool`
-- Registers `openai-computer` for OpenAI native computer use
+- Uses built-in `openai` with the local `computer` custom-tool harness
 - Registers `anthropic-computer` while reusing pi's existing Anthropic provider path
 - Forces computer-only mode by:
   - activating only the `computer` tool on session start
@@ -47,7 +47,7 @@ PI_COMPUTER_USE_ENABLED=1 \
 DISPLAY=:99 \
 pi --print --mode json --no-tools \
   -e ./extensions/computer-use/index.ts \
-  --provider openai-computer --model gpt-5.4 \
+  --provider openai --model gpt-5.4 \
   "Open Firefox and take a screenshot."
 ```
 
@@ -73,7 +73,7 @@ The Harbor wrapper:
 - loads this extension explicitly with `-e`
 - launches pi with:
   - `--no-tools`
-  - `--extension "$EXT_PATH"`
+- `--extension "$EXT_PATH"`
 
 Suggested import path:
 

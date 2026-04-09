@@ -64,17 +64,17 @@ class PiComputerUse(BaseInstalledAgent):
             if "/" not in self.model_name:
                 raise ValueError("Model name must be in the format provider/model_name")
             provider, model_id = self.model_name.split("/", 1)
-            if provider in {"openai", "openai-computer"}:
-                return "openai-computer", model_id
+            if provider == "openai":
+                return "openai", model_id
             if provider in {"anthropic", "anthropic-computer"}:
                 return "anthropic-computer", model_id
             raise ValueError(
                 f"Unsupported computer-use provider '{provider}'. "
-                "Use openai/openai-computer or anthropic/anthropic-computer."
+                "Use openai or anthropic/anthropic-computer."
             )
 
         if os.environ.get("OPENAI_API_KEY"):
-            return "openai-computer", "gpt-5.4"
+            return "openai", "gpt-5.4"
         if os.environ.get("ANTHROPIC_OAUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY"):
             return "anthropic-computer", "claude-sonnet-4-5"
         raise ValueError("No supported API credentials found for openai or anthropic computer use.")
@@ -88,10 +88,10 @@ class PiComputerUse(BaseInstalledAgent):
             "PI_COMPUTER_USE_DISPLAY_HEIGHT": "900",
             "PI_COMPUTER_USE_REQUIRE_OPT_IN": "1",
         }
-        if provider == "openai-computer":
+        if provider == "openai":
             api_key = os.environ.get("OPENAI_API_KEY")
             if not api_key:
-                raise ValueError("OPENAI_API_KEY is required for openai-computer.")
+                raise ValueError("OPENAI_API_KEY is required for openai.")
             env["OPENAI_API_KEY"] = api_key
             return env
 
