@@ -97,12 +97,7 @@ class PiComputerUse(BaseInstalledAgent):
 
         provider, _ = self.model_name.split("/", 1)
 
-        env: dict[str, str] = {
-            "PI_COMPUTER_USE_DISPLAY": ":99",
-            "PI_COMPUTER_USE_DISPLAY_NUMBER": "99",
-            "PI_COMPUTER_USE_DISPLAY_WIDTH": "1440",
-            "PI_COMPUTER_USE_DISPLAY_HEIGHT": "900",
-        }
+        env: dict[str, str] = {}
         keys: list[str] = []
 
         if provider == "amazon-bedrock":
@@ -164,7 +159,7 @@ class PiComputerUse(BaseInstalledAgent):
             environment,
             command=(
                 f". ~/.nvm/nvm.sh; "
-                'export DISPLAY="${PI_COMPUTER_USE_DISPLAY:-:99}"; '
+                'export DISPLAY="${PI_COMPUTER_USE_DISPLAY:-${DISPLAY:-:99}}"; '
                 "STARTED_XVFB=0; "
                 "STARTED_OPENBOX=0; "
                 "if ! xdotool getdisplaygeometry >/dev/null 2>&1; then "
@@ -185,6 +180,15 @@ class PiComputerUse(BaseInstalledAgent):
                 'if [ "${STARTED_XVFB:-0}" = "1" ]; then kill "$XVFB_PID" 2>/dev/null || true; fi; '
                 "}; "
                 "trap cleanup EXIT; "
+                'GEOMETRY="$(xdotool getdisplaygeometry)"; '
+                'PI_WIDTH="${GEOMETRY%% *}"; '
+                'PI_HEIGHT="${GEOMETRY##* }"; '
+                'PI_DISPLAY_NUMBER="${DISPLAY##*:}"; '
+                'PI_DISPLAY_NUMBER="${PI_DISPLAY_NUMBER%%.*}"; '
+                'export PI_COMPUTER_USE_DISPLAY="$DISPLAY"; '
+                'export PI_COMPUTER_USE_DISPLAY_WIDTH="${PI_COMPUTER_USE_DISPLAY_WIDTH:-$PI_WIDTH}"; '
+                'export PI_COMPUTER_USE_DISPLAY_HEIGHT="${PI_COMPUTER_USE_DISPLAY_HEIGHT:-$PI_HEIGHT}"; '
+                'export PI_COMPUTER_USE_DISPLAY_NUMBER="${PI_COMPUTER_USE_DISPLAY_NUMBER:-$PI_DISPLAY_NUMBER}"; '
                 f"pi --print --mode json --no-session --no-tools "
                 f'--extension "{self._INSTALLED_EXTENSION_PATH}" '
                 f"{model_args}"

@@ -64,6 +64,7 @@ The Harbor wrapper:
 - installs the required X11 tooling
 - reuses an existing `DISPLAY` session when present, otherwise starts `Xvfb`
 - starts `openbox` only when it is not already running
+- derives `PI_COMPUTER_USE_DISPLAY_WIDTH`, `PI_COMPUTER_USE_DISPLAY_HEIGHT`, and `PI_COMPUTER_USE_DISPLAY_NUMBER` from the active display unless you override them
 - downloads this extension from raw GitHub into `~/.pi/agent/extensions/computer-use/index.ts`
 - loads that staged extension explicitly with `-e`
 - uses the `provider/model` Harbor passes to the agent
