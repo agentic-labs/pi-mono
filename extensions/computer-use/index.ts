@@ -38,6 +38,8 @@ const DEFAULT_HOLD_KEY_DURATION_SECONDS = 0.5;
 const DEFAULT_OPENAI_MODEL_ID = "gpt-5.4";
 const DEFAULT_ANTHROPIC_MODEL_ID = "claude-sonnet-4-5";
 const DEFAULT_ANTHROPIC_BETA = "computer-use-2025-11-24";
+const ANTHROPIC_FINE_GRAINED_TOOL_STREAMING_BETA = "fine-grained-tool-streaming-2025-05-14";
+const ANTHROPIC_INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14";
 const REQUIRED_BINARIES = ["bash", "scrot", "xdotool"] as const;
 const DEFAULT_COMPUTER_PROMPT_SNIPPET =
 	"`computer`: interact with an isolated Linux desktop by taking screenshots and performing mouse/keyboard actions. Use this instead of shell tools.";
@@ -218,6 +220,24 @@ function clampReasoningLevel(
 	return level === "xhigh" ? "high" : level;
 }
 
+function supportsAdaptiveAnthropicThinking(modelId: string): boolean {
+	return (
+		modelId.includes("opus-4-6") ||
+		modelId.includes("opus-4.6") ||
+		modelId.includes("sonnet-4-6") ||
+		modelId.includes("sonnet-4.6")
+	);
+}
+
+function anthropicComputerHeaders(modelId: string): Record<string, string> {
+	const betas = [ANTHROPIC_FINE_GRAINED_TOOL_STREAMING_BETA];
+	if (!supportsAdaptiveAnthropicThinking(modelId)) {
+		betas.push(ANTHROPIC_INTERLEAVED_THINKING_BETA);
+	}
+	betas.push(DEFAULT_ANTHROPIC_BETA);
+	return { "anthropic-beta": betas.join(",") };
+}
+
 function getDisplayEnv(displayNumber: number): string {
 	return process.env.PI_COMPUTER_USE_DISPLAY || process.env.DISPLAY || `:${displayNumber}`;
 }
@@ -354,6 +374,10 @@ async function sleep(ms: number): Promise<void> {
 	await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function shellEscape(value: string): string {
+	return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
 async function execOrThrow(
 	pi: ExtensionAPI,
 	command: string,
@@ -372,8 +396,8 @@ async function execOrThrow(
 		return result.stdout;
 	}
 	if (withDisplay && state) {
-		const quoted = [command, ...args].map((part) => JSON.stringify(part)).join(" ");
-		const fallback = await pi.exec("bash", ["-lc", `DISPLAY=${state.config.displayEnv} ${quoted}`], {
+		const quoted = [command, ...args].map(shellEscape).join(" ");
+		const fallback = await pi.exec("bash", ["-lc", `DISPLAY=${shellEscape(state.config.displayEnv)} ${quoted}`], {
 			cwd: ctx.cwd,
 			signal: ctx.signal,
 			timeout,
@@ -563,8 +587,21 @@ async function executeAction(
 			});
 			break;
 		case "scroll": {
-			const button = action.scrollY < 0 ? "4" : "5";
-			const repeats = Math.max(1, Math.abs(Math.round(action.scrollY)));
+			const scrollClicks = [
+				{
+					amount: Math.round(action.scrollY),
+					negativeButton: "4",
+					positiveButton: "5",
+				},
+				{
+					amount: Math.round(action.scrollX),
+					negativeButton: "6",
+					positiveButton: "7",
+				},
+			].filter((entry) => entry.amount !== 0);
+			if (scrollClicks.length === 0) {
+				return undefined;
+			}
 			await withModifiers(pi, state, ctx, action.modifiers, async () => {
 				await execOrThrow(
 					pi,
@@ -575,15 +612,24 @@ async function executeAction(
 					true,
 					state,
 				);
-				await execOrThrow(
-					pi,
-					"xdotool",
-					["click", "--repeat", String(repeats), "--delay", String(state.config.clickDelayMs), button],
-					ctx,
-					15000,
-					true,
-					state,
-				);
+				for (const scrollClick of scrollClicks) {
+					await execOrThrow(
+						pi,
+						"xdotool",
+						[
+							"click",
+							"--repeat",
+							String(Math.abs(scrollClick.amount)),
+							"--delay",
+							String(state.config.clickDelayMs),
+							scrollClick.amount < 0 ? scrollClick.negativeButton : scrollClick.positiveButton,
+						],
+						ctx,
+						15000,
+						true,
+						state,
+					);
+				}
 			});
 			break;
 		}
@@ -1035,6 +1081,13 @@ function prepareComputerArguments(args: unknown): ComputerToolParams {
 	throw new Error("Unsupported computer tool arguments.");
 }
 
+function splitAnthropicToolUseIds(toolUseId: string, actionCount: number): string[] {
+	if (actionCount <= 1) {
+		return [toolUseId];
+	}
+	return Array.from({ length: actionCount }, (_value, index) => `${toolUseId}:${index + 1}`);
+}
+
 function rewriteAnthropicPayload(payload: unknown, modelProvider: string): unknown {
 	if (!payload || typeof payload !== "object" || modelProvider !== "anthropic-computer") {
 		return payload;
@@ -1045,6 +1098,7 @@ function rewriteAnthropicPayload(payload: unknown, modelProvider: string): unkno
 		tool_choice?: Record<string, unknown>;
 		headers?: Record<string, string>;
 	};
+	const rewrittenToolResultIds = new Map<string, string[]>();
 
 	if (Array.isArray(candidate.tools)) {
 		candidate.tools = candidate.tools.map((tool) => {
@@ -1065,28 +1119,67 @@ function rewriteAnthropicPayload(payload: unknown, modelProvider: string): unkno
 
 	if (Array.isArray(candidate.messages)) {
 		candidate.messages = candidate.messages.map((message) => {
-			if (!message || message.role !== "assistant" || !Array.isArray(message.content)) {
+			if (!message || !Array.isArray(message.content)) {
 				return message;
+			}
+			const content = message.content as unknown[];
+			if (message.role === "assistant") {
+				return {
+					...message,
+					content: content.flatMap((block): unknown[] => {
+						if (!block || typeof block !== "object") return [block];
+						const typedBlock = block as {
+							type?: string;
+							name?: string;
+							id?: string;
+							input?: Record<string, unknown>;
+						};
+						if (typedBlock.type !== "tool_use" || typedBlock.name !== COMPUTER_TOOL_NAME) {
+							return [block];
+						}
+						const actions = ((typedBlock.input as ComputerToolParams | undefined)?.actions ?? []).filter(Boolean);
+						if (actions.length === 0) {
+							return [block];
+						}
+						const toolUseIds =
+							typeof typedBlock.id === "string"
+								? splitAnthropicToolUseIds(typedBlock.id, actions.length)
+								: undefined;
+						if (typeof typedBlock.id === "string" && toolUseIds && toolUseIds.length > 1) {
+							rewrittenToolResultIds.set(typedBlock.id, toolUseIds);
+						}
+						return actions.map((action, index) => ({
+							...typedBlock,
+							...(toolUseIds?.[index] ? { id: toolUseIds[index] } : {}),
+							name: COMPUTER_TOOL_NAME,
+							input: computerActionToAnthropic(action),
+						}));
+					}),
+				};
+			}
+			if (message.role === "user") {
+				return {
+					...message,
+					content: content.flatMap((block): unknown[] => {
+						if (!block || typeof block !== "object") return [block];
+						const typedBlock = block as { type?: string; tool_use_id?: string };
+						if (typedBlock.type !== "tool_result" || typeof typedBlock.tool_use_id !== "string") {
+							return [block];
+						}
+						const toolUseIds = rewrittenToolResultIds.get(typedBlock.tool_use_id);
+						if (!toolUseIds || toolUseIds.length <= 1) {
+							return [block];
+						}
+						return toolUseIds.map((toolUseId) => ({
+							...typedBlock,
+							tool_use_id: toolUseId,
+						}));
+					}),
+				};
 			}
 			return {
 				...message,
-				content: message.content.map((block) => {
-					if (!block || typeof block !== "object") return block;
-					const typedBlock = block as { type?: string; name?: string; input?: Record<string, unknown> };
-					if (typedBlock.type !== "tool_use" || typedBlock.name !== COMPUTER_TOOL_NAME) {
-						return block;
-					}
-					const actionWrapper = (typedBlock.input as unknown) as ComputerToolParams | undefined;
-					const firstAction = actionWrapper?.actions?.[0];
-					if (!firstAction) {
-						return block;
-					}
-					return {
-						...typedBlock,
-						name: COMPUTER_TOOL_NAME,
-						input: computerActionToAnthropic(firstAction),
-					};
-				}),
+				content,
 			};
 		});
 	}
@@ -1212,6 +1305,7 @@ export default function registerComputerUseExtension(pi: ExtensionAPI): void {
 				cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
 				contextWindow: 200000,
 				maxTokens: 64000,
+				headers: anthropicComputerHeaders(DEFAULT_ANTHROPIC_MODEL_ID),
 			},
 			{
 				id: "claude-opus-4-5",
@@ -1221,6 +1315,7 @@ export default function registerComputerUseExtension(pi: ExtensionAPI): void {
 				cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
 				contextWindow: 200000,
 				maxTokens: 64000,
+				headers: anthropicComputerHeaders("claude-opus-4-5"),
 			},
 			{
 				id: "claude-opus-4-6",
@@ -1230,6 +1325,7 @@ export default function registerComputerUseExtension(pi: ExtensionAPI): void {
 				cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
 				contextWindow: 1000000,
 				maxTokens: 128000,
+				headers: anthropicComputerHeaders("claude-opus-4-6"),
 			},
 			{
 				id: "claude-sonnet-4-6",
@@ -1239,6 +1335,7 @@ export default function registerComputerUseExtension(pi: ExtensionAPI): void {
 				cost: { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
 				contextWindow: 1000000,
 				maxTokens: 64000,
+				headers: anthropicComputerHeaders("claude-sonnet-4-6"),
 			},
 		],
 	});
