@@ -84,6 +84,53 @@ class PiComputerUse(BaseInstalledAgent):
             f'-o "{self._INSTALLED_EXTENSION_PATH}"'
         )
 
+    def _build_run_command(
+        self,
+        model_args: str,
+        cli_flags: str,
+        escaped_instruction: str,
+        output_file: str,
+    ) -> str:
+        return (
+            f". ~/.nvm/nvm.sh; "
+            'export DISPLAY="${PI_COMPUTER_USE_DISPLAY:-${DISPLAY:-:99}}"; '
+            "STARTED_XVFB=0; "
+            "STARTED_OPENBOX=0; "
+            "if ! xdotool getdisplaygeometry >/dev/null 2>&1; then "
+            'Xvfb "$DISPLAY" -screen 0 1440x900x24 >/tmp/pi-computer-use-xvfb.log 2>&1 & '
+            "XVFB_PID=$!; "
+            "STARTED_XVFB=1; "
+            "sleep 1; "
+            "fi; "
+            'if ! xdotool getdisplaygeometry >/dev/null 2>&1; then echo "Failed to initialize X display $DISPLAY" >&2; exit 1; fi; '
+            "if ! pgrep -x openbox >/dev/null 2>&1; then "
+            "openbox >/tmp/pi-computer-use-openbox.log 2>&1 & "
+            "OPENBOX_PID=$!; "
+            "STARTED_OPENBOX=1; "
+            "sleep 1; "
+            "fi; "
+            'cleanup() { '
+            'if [ "${STARTED_OPENBOX:-0}" = "1" ]; then kill "$OPENBOX_PID" 2>/dev/null || true; fi; '
+            'if [ "${STARTED_XVFB:-0}" = "1" ]; then kill "$XVFB_PID" 2>/dev/null || true; fi; '
+            "}; "
+            "trap cleanup EXIT; "
+            'GEOMETRY="$(xdotool getdisplaygeometry)"; '
+            'PI_WIDTH="${GEOMETRY%% *}"; '
+            'PI_HEIGHT="${GEOMETRY##* }"; '
+            'PI_DISPLAY_NUMBER="${DISPLAY##*:}"; '
+            'PI_DISPLAY_NUMBER="${PI_DISPLAY_NUMBER%%.*}"; '
+            'export PI_COMPUTER_USE_DISPLAY="$DISPLAY"; '
+            'export PI_COMPUTER_USE_DISPLAY_WIDTH="${PI_COMPUTER_USE_DISPLAY_WIDTH:-$PI_WIDTH}"; '
+            'export PI_COMPUTER_USE_DISPLAY_HEIGHT="${PI_COMPUTER_USE_DISPLAY_HEIGHT:-$PI_HEIGHT}"; '
+            'export PI_COMPUTER_USE_DISPLAY_NUMBER="${PI_COMPUTER_USE_DISPLAY_NUMBER:-$PI_DISPLAY_NUMBER}"; '
+            f"pi --print --mode json --no-session --no-tools "
+            f'--extension "{self._INSTALLED_EXTENSION_PATH}" '
+            f"{model_args}"
+            f"{cli_flags}"
+            f"{escaped_instruction} "
+            f"2>&1 </dev/null | stdbuf -oL tee {shlex.quote(output_file)}"
+        )
+
     @with_prompt_template
     async def run(
         self,
@@ -157,44 +204,11 @@ class PiComputerUse(BaseInstalledAgent):
 
         await self.exec_as_agent(
             environment,
-            command=(
-                f". ~/.nvm/nvm.sh; "
-                'export DISPLAY="${PI_COMPUTER_USE_DISPLAY:-${DISPLAY:-:99}}"; '
-                "STARTED_XVFB=0; "
-                "STARTED_OPENBOX=0; "
-                "if ! xdotool getdisplaygeometry >/dev/null 2>&1; then "
-                'Xvfb "$DISPLAY" -screen 0 1440x900x24 >/tmp/pi-computer-use-xvfb.log 2>&1 & '
-                "XVFB_PID=$!; "
-                "STARTED_XVFB=1; "
-                "sleep 1; "
-                "fi; "
-                'if ! xdotool getdisplaygeometry >/dev/null 2>&1; then echo "Failed to initialize X display $DISPLAY" >&2; exit 1; fi; '
-                "if ! pgrep -x openbox >/dev/null 2>&1; then "
-                "openbox >/tmp/pi-computer-use-openbox.log 2>&1 & "
-                "OPENBOX_PID=$!; "
-                "STARTED_OPENBOX=1; "
-                "sleep 1; "
-                "fi; "
-                'cleanup() { '
-                'if [ "${STARTED_OPENBOX:-0}" = "1" ]; then kill "$OPENBOX_PID" 2>/dev/null || true; fi; '
-                'if [ "${STARTED_XVFB:-0}" = "1" ]; then kill "$XVFB_PID" 2>/dev/null || true; fi; '
-                "}; "
-                "trap cleanup EXIT; "
-                'GEOMETRY="$(xdotool getdisplaygeometry)"; '
-                'PI_WIDTH="${GEOMETRY%% *}"; '
-                'PI_HEIGHT="${GEOMETRY##* }"; '
-                'PI_DISPLAY_NUMBER="${DISPLAY##*:}"; '
-                'PI_DISPLAY_NUMBER="${PI_DISPLAY_NUMBER%%.*}"; '
-                'export PI_COMPUTER_USE_DISPLAY="$DISPLAY"; '
-                'export PI_COMPUTER_USE_DISPLAY_WIDTH="${PI_COMPUTER_USE_DISPLAY_WIDTH:-$PI_WIDTH}"; '
-                'export PI_COMPUTER_USE_DISPLAY_HEIGHT="${PI_COMPUTER_USE_DISPLAY_HEIGHT:-$PI_HEIGHT}"; '
-                'export PI_COMPUTER_USE_DISPLAY_NUMBER="${PI_COMPUTER_USE_DISPLAY_NUMBER:-$PI_DISPLAY_NUMBER}"; '
-                f"pi --print --mode json --no-session --no-tools "
-                f'--extension "{self._INSTALLED_EXTENSION_PATH}" '
-                f"{model_args}"
-                f"{cli_flags}"
-                f"{escaped_instruction} "
-                f"2>&1 </dev/null | stdbuf -oL tee {shlex.quote(output_file)}"
+            command=self._build_run_command(
+                model_args=model_args,
+                cli_flags=cli_flags,
+                escaped_instruction=escaped_instruction,
+                output_file=output_file,
             ),
             env=env,
         )
