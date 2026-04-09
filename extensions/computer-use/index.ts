@@ -192,7 +192,8 @@ function normalizeModifier(key: string): string {
 }
 
 function normalizeKey(key: string): string {
-	switch (key.toLowerCase()) {
+	const normalizedKey = normalizeModifier(key);
+	switch (normalizedKey.toLowerCase()) {
 		case "return":
 		case "enter":
 			return "Return";
@@ -206,7 +207,7 @@ function normalizeKey(key: string): string {
 		case "space":
 			return "space";
 		default:
-			return key;
+			return normalizedKey;
 	}
 }
 
