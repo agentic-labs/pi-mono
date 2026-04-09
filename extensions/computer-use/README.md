@@ -71,9 +71,11 @@ The Harbor wrapper:
 - installs the required X11 tooling
 - starts `Xvfb`
 - loads this extension explicitly with `-e`
+- uses the `provider/model` Harbor passes to the agent
+- forwards provider-specific credential env vars using the same provider mapping as Harbor's official `pi.py`
 - launches pi with:
   - `--no-tools`
-- `--extension "$EXT_PATH"`
+  - `--extension "$EXT_PATH"`
 
 Suggested import path:
 

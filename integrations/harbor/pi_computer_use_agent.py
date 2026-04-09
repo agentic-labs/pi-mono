@@ -60,24 +60,18 @@ class PiComputerUse(BaseInstalledAgent):
         )
 
     def _resolve_model(self) -> tuple[str, str]:
-        if self.model_name:
-            if "/" not in self.model_name:
-                raise ValueError("Model name must be in the format provider/model_name")
-            provider, model_id = self.model_name.split("/", 1)
-            if provider == "openai":
-                return "openai", model_id
-            if provider == "anthropic":
-                return "anthropic", model_id
-            raise ValueError(
-                f"Unsupported computer-use provider '{provider}'. "
-                "Use openai or anthropic."
-            )
+        if not self.model_name or "/" not in self.model_name:
+            raise ValueError("Model name must be provided by Harbor in the format provider/model_name.")
+        return tuple(self.model_name.split("/", 1))
 
-        if os.environ.get("OPENAI_API_KEY"):
-            return "openai", "gpt-5.4"
-        if os.environ.get("ANTHROPIC_OAUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY"):
-            return "anthropic", "claude-sonnet-4-6"
-        raise ValueError("No supported API credentials found for openai or anthropic computer use.")
+    def _build_register_skills_command(self) -> str | None:
+        if not self.skills_dir:
+            return None
+        return (
+            f"mkdir -p $HOME/.agents/skills && "
+            f"cp -r {shlex.quote(self.skills_dir)}/* "
+            f"$HOME/.agents/skills/ 2>/dev/null || true"
+        )
 
     def _build_env(self, provider: str) -> dict[str, str]:
         env = {
@@ -88,20 +82,49 @@ class PiComputerUse(BaseInstalledAgent):
             "PI_COMPUTER_USE_DISPLAY_HEIGHT": "900",
             "PI_COMPUTER_USE_REQUIRE_OPT_IN": "1",
         }
-        if provider == "openai":
-            api_key = os.environ.get("OPENAI_API_KEY")
-            if not api_key:
-                raise ValueError("OPENAI_API_KEY is required for openai.")
-            env["OPENAI_API_KEY"] = api_key
-            return env
+        keys: list[str] = []
 
-        oauth_token = os.environ.get("ANTHROPIC_OAUTH_TOKEN")
-        api_key = oauth_token or os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY or ANTHROPIC_OAUTH_TOKEN is required for anthropic.")
-        env["ANTHROPIC_API_KEY"] = api_key
-        if oauth_token:
-            env["ANTHROPIC_OAUTH_TOKEN"] = oauth_token
+        if provider == "amazon-bedrock":
+            keys.extend(["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_REGION"])
+        elif provider == "anthropic":
+            keys.extend(["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"])
+        elif provider == "github-copilot":
+            keys.append("GITHUB_TOKEN")
+        elif provider == "google":
+            keys.extend(
+                [
+                    "GEMINI_API_KEY",
+                    "GOOGLE_GENERATIVE_AI_API_KEY",
+                    "GOOGLE_APPLICATION_CREDENTIALS",
+                    "GOOGLE_CLOUD_PROJECT",
+                    "GOOGLE_CLOUD_LOCATION",
+                    "GOOGLE_GENAI_USE_VERTEXAI",
+                    "GOOGLE_API_KEY",
+                ]
+            )
+        elif provider == "groq":
+            keys.append("GROQ_API_KEY")
+        elif provider == "huggingface":
+            keys.append("HF_TOKEN")
+        elif provider == "mistral":
+            keys.append("MISTRAL_API_KEY")
+        elif provider == "openai":
+            keys.append("OPENAI_API_KEY")
+        elif provider == "openrouter":
+            keys.append("OPENROUTER_API_KEY")
+        elif provider == "xai":
+            keys.append("XAI_API_KEY")
+        else:
+            raise ValueError(
+                f"Unknown provider '{provider}'. If you believe this provider "
+                "should be supported, please contact the maintainers."
+            )
+
+        for key in keys:
+            value = os.environ.get(key)
+            if value:
+                env[key] = value
+
         return env
 
     @with_prompt_template
@@ -119,6 +142,10 @@ class PiComputerUse(BaseInstalledAgent):
 
         escaped_instruction = shlex.quote(instruction)
         output_file = f"/logs/agent/{self._OUTPUT_FILENAME}"
+        skills_command = self._build_register_skills_command()
+
+        if skills_command:
+            await self.exec_as_agent(environment, command=skills_command)
 
         await self.exec_as_agent(
             environment,
