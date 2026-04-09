@@ -74,6 +74,7 @@ The Harbor wrapper:
 - uses the `provider/model` Harbor passes to the agent
 - forwards provider-specific credential env vars using the same provider mapping as Harbor's official `pi.py`
 - launches pi with:
+  - `--no-session`
   - `--no-tools`
   - `--extension "$EXT_PATH"`
 

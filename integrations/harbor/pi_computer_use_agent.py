@@ -2,13 +2,17 @@ import json
 import os
 import shlex
 
-from harbor.agents.installed.base import BaseInstalledAgent, CliFlag, with_prompt_template
+from harbor.agents.installed.base import (
+    BaseInstalledAgent,
+    CliFlag,
+    with_prompt_template,
+)
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 
 
 class PiComputerUse(BaseInstalledAgent):
-    _OUTPUT_FILENAME = "pi-computer-use.jsonl"
+    _OUTPUT_FILENAME = "pi.txt"
     _EXTENSION_PATHS = (
         "./extensions/computer-use/index.ts",
         "/workspace/extensions/computer-use/index.ts",
@@ -47,22 +51,15 @@ class PiComputerUse(BaseInstalledAgent):
             environment,
             command=(
                 "set -euo pipefail; "
-                'export NVM_DIR="$HOME/.nvm"; '
-                "if [ ! -s \"$NVM_DIR/nvm.sh\" ]; then "
-                "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.2/install.sh | bash; "
-                "fi; "
-                '. "$NVM_DIR/nvm.sh"; '
-                "nvm install 22; "
-                "npm install -g "
-                f"@mariozechner/pi-coding-agent{version_spec}; "
+                "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.2/install.sh | bash && "
+                'export NVM_DIR="$HOME/.nvm" && '
+                '\\. "$NVM_DIR/nvm.sh" || true && '
+                "command -v nvm &>/dev/null || { echo 'Error: NVM failed to load' >&2; exit 1; } && "
+                "nvm install 22 && npm -v && "
+                f"npm install -g @mariozechner/pi-coding-agent{version_spec} && "
                 "pi --version"
             ),
         )
-
-    def _resolve_model(self) -> tuple[str, str]:
-        if not self.model_name or "/" not in self.model_name:
-            raise ValueError("Model name must be provided by Harbor in the format provider/model_name.")
-        return tuple(self.model_name.split("/", 1))
 
     def _build_register_skills_command(self) -> str | None:
         if not self.skills_dir:
@@ -73,8 +70,20 @@ class PiComputerUse(BaseInstalledAgent):
             f"$HOME/.agents/skills/ 2>/dev/null || true"
         )
 
-    def _build_env(self, provider: str) -> dict[str, str]:
-        env = {
+    @with_prompt_template
+    async def run(
+        self,
+        instruction: str,
+        environment: BaseEnvironment,
+        context: AgentContext,
+    ) -> None:
+        escaped_instruction = shlex.quote(instruction)
+        if not self.model_name or "/" not in self.model_name:
+            raise ValueError("Model name must be in the format provider/model_name")
+
+        provider, _ = self.model_name.split("/", 1)
+
+        env: dict[str, str] = {
             "PI_COMPUTER_USE_ENABLED": "1",
             "PI_COMPUTER_USE_DISPLAY": ":99",
             "PI_COMPUTER_USE_DISPLAY_NUMBER": "99",
@@ -121,38 +130,27 @@ class PiComputerUse(BaseInstalledAgent):
             )
 
         for key in keys:
-            value = os.environ.get(key)
-            if value:
-                env[key] = value
+            val = os.environ.get(key)
+            if val:
+                env[key] = val
 
-        return env
+        model_args = (
+            f"--provider {provider} --model {self.model_name.split('/', 1)[1]} "
+        )
 
-    @with_prompt_template
-    async def run(
-        self,
-        instruction: str,
-        environment: BaseEnvironment,
-        context: AgentContext,
-    ) -> None:
-        provider, model_id = self._resolve_model()
-        env = self._build_env(provider)
         cli_flags = self.build_cli_flags()
         if cli_flags:
-            cli_flags = f"{cli_flags} "
+            cli_flags += " "
 
-        escaped_instruction = shlex.quote(instruction)
         output_file = f"/logs/agent/{self._OUTPUT_FILENAME}"
         skills_command = self._build_register_skills_command()
-
         if skills_command:
             await self.exec_as_agent(environment, command=skills_command)
 
         await self.exec_as_agent(
             environment,
             command=(
-                "set -euo pipefail; "
-                'export NVM_DIR="$HOME/.nvm"; '
-                '. "$NVM_DIR/nvm.sh"; '
+                f". ~/.nvm/nvm.sh; "
                 "EXT_PATH=''; "
                 f"for candidate in {' '.join(shlex.quote(path) for path in self._EXTENSION_PATHS)}; do "
                 'if [ -f "$candidate" ]; then EXT_PATH="$candidate"; break; fi; '
@@ -164,9 +162,9 @@ class PiComputerUse(BaseInstalledAgent):
                 "OPENBOX_PID=$!; "
                 "trap 'kill $OPENBOX_PID $XVFB_PID 2>/dev/null || true' EXIT; "
                 "sleep 1; "
-                f"pi --print --mode json --no-tools "
+                f"pi --print --mode json --no-session --no-tools "
                 f'--extension "$EXT_PATH" '
-                f"--provider {shlex.quote(provider)} --model {shlex.quote(model_id)} "
+                f"{model_args}"
                 f"{cli_flags}"
                 f"{escaped_instruction} "
                 f"2>&1 </dev/null | stdbuf -oL tee {shlex.quote(output_file)}"
