@@ -13,7 +13,7 @@ Single-file pi extension for native computer-use workflows plus a lightweight Ha
   - `scrot`
   - `xdotool`
 - Uses built-in `openai` with the local `computer` custom-tool harness
-- Registers `anthropic-computer` while reusing pi's existing Anthropic provider path
+- Uses built-in `anthropic` with the same local `computer` custom-tool harness
 - Forces computer-only mode by:
   - activating only the `computer` tool on session start
   - blocking non-`computer` tool calls at runtime
@@ -59,7 +59,7 @@ PI_COMPUTER_USE_ENABLED=1 \
 DISPLAY=:99 \
 pi --print --mode json --no-tools \
   -e ./extensions/computer-use/index.ts \
-  --provider anthropic-computer --model claude-sonnet-4-5 \
+  --provider anthropic --model claude-sonnet-4-5 \
   "Open Firefox and take a screenshot."
 ```
 

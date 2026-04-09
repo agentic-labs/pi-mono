@@ -66,17 +66,17 @@ class PiComputerUse(BaseInstalledAgent):
             provider, model_id = self.model_name.split("/", 1)
             if provider == "openai":
                 return "openai", model_id
-            if provider in {"anthropic", "anthropic-computer"}:
-                return "anthropic-computer", model_id
+            if provider == "anthropic":
+                return "anthropic", model_id
             raise ValueError(
                 f"Unsupported computer-use provider '{provider}'. "
-                "Use openai or anthropic/anthropic-computer."
+                "Use openai or anthropic."
             )
 
         if os.environ.get("OPENAI_API_KEY"):
             return "openai", "gpt-5.4"
         if os.environ.get("ANTHROPIC_OAUTH_TOKEN") or os.environ.get("ANTHROPIC_API_KEY"):
-            return "anthropic-computer", "claude-sonnet-4-5"
+            return "anthropic", "claude-sonnet-4-5"
         raise ValueError("No supported API credentials found for openai or anthropic computer use.")
 
     def _build_env(self, provider: str) -> dict[str, str]:
@@ -98,7 +98,7 @@ class PiComputerUse(BaseInstalledAgent):
         oauth_token = os.environ.get("ANTHROPIC_OAUTH_TOKEN")
         api_key = oauth_token or os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY or ANTHROPIC_OAUTH_TOKEN is required for anthropic-computer.")
+            raise ValueError("ANTHROPIC_API_KEY or ANTHROPIC_OAUTH_TOKEN is required for anthropic.")
         env["ANTHROPIC_API_KEY"] = api_key
         if oauth_token:
             env["ANTHROPIC_OAUTH_TOKEN"] = oauth_token
