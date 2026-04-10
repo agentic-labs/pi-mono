@@ -1,12 +1,7 @@
 {
-  "extends": "../../tsconfig.json",
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "module": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "moduleResolution": "bundler",
-    "noEmit": true,
-    "allowSyntheticDefaultImports": true
+    "noEmit": true
   },
-  "include": ["src/**/*"],
-  "exclude": ["../web-ui/example/**/*", "**/dist/**"]
+  "include": ["src/**/*"]
 }
