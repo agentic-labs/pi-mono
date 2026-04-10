@@ -226,7 +226,7 @@ async function resolveCli(pi: ExtensionAPI, state: DriverState, ctx: ExtensionCo
 		throw new Error("playwright-cli is not installed. Install it with npm install -g @playwright/cli@latest.");
 	}
 	const command = result.stdout.trim();
-	state.resolvedCli = command === "playwright-cli" ? { command, baseArgs: [] } : { command: "npx", baseArgs: ["-y", "playwright-cli"] };
+	state.resolvedCli = command === "playwright-cli" ? { command, baseArgs: [] } : { command: "npx", baseArgs: ["-y", "@playwright/cli"] };
 	return state.resolvedCli;
 }
 
