@@ -390,17 +390,6 @@ function truncateOutput(label: string, text: string): string | undefined {
 	return content;
 }
 
-function truncateSnapshot(text: string): string {
-	const truncation = truncateTail(text, { maxLines: DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES });
-	if (!truncation.truncated) {
-		return truncation.content.trim();
-	}
-	let content = truncation.content.trim();
-	content += `\n\n[Snapshot truncated: showing ${truncation.outputLines} of ${truncation.totalLines} lines`;
-	content += ` (${formatSize(truncation.outputBytes)} of ${formatSize(truncation.totalBytes)})]`;
-	return content;
-}
-
 async function resolveCli(pi: ExtensionAPI, state: DriverState, ctx: ExtensionContext): Promise<ResolvedCli> {
 	if (state.resolvedCli) {
 		return state.resolvedCli;
@@ -478,7 +467,7 @@ async function runBrowserTool(
 		let snapshotPath = output.snapshotPath;
 		if (params.command === "snapshot" && prepared.outputPath) {
 			snapshotPath = prepared.outputPath;
-			snapshotText = truncateSnapshot(await readFile(prepared.outputPath, "utf8"));
+			snapshotText = truncateOutput("Snapshot", await readFile(prepared.outputPath, "utf8"));
 		}
 		if (params.command === "screenshot" && prepared.outputPath) {
 			image = await readImage(prepared.outputPath);
