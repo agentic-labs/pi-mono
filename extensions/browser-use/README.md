@@ -18,6 +18,14 @@ pi -e ./extensions/browser-use/index.ts
 
 The extension exposes a single `browser` tool and blocks all non-browser tools for the session.
 
+Tool calls use flat top-level arguments:
+
+```json
+{ "command": "goto", "url": "https://example.com" }
+```
+
+Do not nest command parameters under `args`.
+
 ## Supported commands
 
 - page interaction: `open`, `goto`, `click`, `type`, `fill`, `select`, `check`, `uncheck`, `hover`, `drag`, `upload`, `close`
