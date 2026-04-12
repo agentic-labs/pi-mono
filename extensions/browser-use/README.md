@@ -16,19 +16,20 @@ npm install -g @playwright/cli@latest
 pi -e ./extensions/browser-use/index.ts
 ```
 
-The extension exposes a single `browser` tool and blocks all non-browser tools for the session.
+The extension exposes multiple `browser_*` tools and blocks all non-browser tools for the session.
 
-Tool calls use flat top-level arguments:
+Start a new session with `browser_open`:
 
 ```json
-{ "command": "goto", "url": "https://example.com" }
+{ "url": "https://example.com" }
 ```
 
-Do not nest command parameters under `args`.
+Then use the other `browser_*` tools against that session.
 
-## Supported commands
+## Tools
 
-- page interaction: `open`, `goto`, `click`, `type`, `fill`, `select`, `check`, `uncheck`, `hover`, `drag`, `upload`, `close`
-- inspection and capture: `snapshot`, `screenshot`, `pdf`
-- navigation and tabs: `go-back`, `go-forward`, `reload`, `tab-list`, `tab-new`, `tab-select`, `tab-close`
-- keyboard and mouse: `press`, `keydown`, `keyup`, `mousemove`, `mousedown`, `mouseup`, `mousewheel`
+- page/session: `browser_open`, `browser_goto`, `browser_close`
+- page interaction: `browser_click`, `browser_type`, `browser_fill`, `browser_select`, `browser_check`, `browser_uncheck`, `browser_hover`, `browser_drag`, `browser_upload`
+- inspection and capture: `browser_snapshot`, `browser_screenshot`, `browser_pdf`
+- navigation and tabs: `browser_navigation`, `browser_tabs`
+- keyboard and mouse: `browser_keyboard`, `browser_mouse`
