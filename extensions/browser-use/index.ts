@@ -10,9 +10,7 @@ import { Type, type Static, type TSchema } from "@sinclair/typebox";
 import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
-	defineTool,
 	formatSize,
-	truncateHead,
 	truncateTail,
 	type ExtensionAPI,
 	type ExtensionContext,
@@ -393,7 +391,7 @@ function truncateOutput(label: string, text: string): string | undefined {
 }
 
 function truncateSnapshot(text: string): string {
-	const truncation = truncateHead(text, { maxLines: DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES });
+	const truncation = truncateTail(text, { maxLines: DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES });
 	if (!truncation.truncated) {
 		return truncation.content.trim();
 	}
@@ -508,21 +506,19 @@ async function runBrowserTool(
 export default function registerBrowserUseExtension(pi: ExtensionAPI): void {
 	const state: DriverState = {};
 
-	pi.registerTool(
-		defineTool({
-			name: BROWSER_TOOL_NAME,
-			label: "Browser",
-			description:
-				"Control a browser via playwright-cli core commands. Supports navigation, page interaction, snapshots, screenshots, tabs, and keyboard or mouse input.",
-			promptSnippet: DEFAULT_BROWSER_PROMPT_SNIPPET,
-			promptGuidelines: DEFAULT_BROWSER_GUIDELINES,
-			parameters: BrowserToolParamsSchema,
-			prepareArguments,
-			async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-				return runBrowserTool(pi, state, ctx, toolCallId, params);
-			},
-		}),
-	);
+	pi.registerTool({
+		name: BROWSER_TOOL_NAME,
+		label: "Browser",
+		description:
+			"Control a browser via playwright-cli core commands. Supports navigation, page interaction, snapshots, screenshots, tabs, and keyboard or mouse input.",
+		promptSnippet: DEFAULT_BROWSER_PROMPT_SNIPPET,
+		promptGuidelines: DEFAULT_BROWSER_GUIDELINES,
+		parameters: BrowserToolParamsSchema,
+		prepareArguments,
+		async execute(toolCallId, params, _signal, _onUpdate, ctx) {
+			return runBrowserTool(pi, state, ctx, toolCallId, params);
+		},
+	});
 
 	pi.on("session_start", () => {
 		pi.setActiveTools([BROWSER_TOOL_NAME]);
