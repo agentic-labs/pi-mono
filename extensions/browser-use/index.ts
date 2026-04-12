@@ -270,7 +270,8 @@ function describeCommand(command: BrowserCommandName, details: string[] = []): s
 
 function buildCommand(params: BrowserToolParams, sessionName: string, toolCallId: string): PreparedCommand {
 	const argv = [`-s=${sessionName}`];
-	if (params.browser) argv.push(`--browser=${params.browser}`);
+	const browser = params.browser ?? "firefox";
+	argv.push(`--browser=${browser}`);
 	if (params.headed) argv.push("--headed");
 	if (params.persistent) argv.push("--persistent");
 
