@@ -560,14 +560,17 @@ async function runComputerTool(
 			summaries.push({ type: action.type, summary: actionSummary(action) });
 			if (screenshot) latestScreenshot = screenshot;
 		}
-		if (!latestScreenshot) {
-			latestScreenshot = await captureScreenshot(pi, state, ctx, toolCallId);
+		const content: (TextContent | ImageContent)[] = [
+			{ type: "text", text: summaries.map((entry, index) => `${index + 1}. ${entry.summary}`).join("\n") },
+		];
+		if (latestScreenshot) {
+			content.push(latestScreenshot.image);
 		}
 		return {
-			content: [{ type: "text", text: summaries.map((entry, index) => `${index + 1}. ${entry.summary}`).join("\n") }, latestScreenshot.image],
+			content,
 			details: {
 				actions: summaries,
-				screenshotPath: latestScreenshot.path,
+				screenshotPath: latestScreenshot?.path,
 				display: {
 					width: state.config.displayWidth,
 					height: state.config.displayHeight,
