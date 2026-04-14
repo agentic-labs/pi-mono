@@ -18,35 +18,36 @@ import {
 
 const EXTENSION_NAME = "browser-use";
 const EXTENSION_PREFIX = "pi-browser-use";
-const BROWSER_TOOL_NAMES = {
-	goto: "browser_goto",
-	click: "browser_click",
-	type: "browser_type",
-	fill: "browser_fill",
-	select: "browser_select",
-	check: "browser_check",
-	uncheck: "browser_uncheck",
-	hover: "browser_hover",
-	drag: "browser_drag",
-	upload: "browser_upload",
-	scroll: "browser_scroll",
-	wait: "browser_wait",
-	close: "browser_close",
-	snapshot: "browser_snapshot",
-	screenshot: "browser_screenshot",
-	pdf: "browser_pdf",
-	navigation: "browser_navigation",
-	tabs: "browser_tabs",
-	keyboard: "browser_keyboard",
-	mouse: "browser_mouse",
-} as const;
-const ACTIVE_BROWSER_TOOL_NAMES = Object.values(BROWSER_TOOL_NAMES);
+const BROWSER_TOOL_NAME = "browser";
+const DEFAULT_BROWSER_PROMPT_SNIPPET =
+	"`browser`: interact with the browser by running one or more sequential steps with agent-browser. Use this instead of shell tools.";
+type BrowserStepType =
+	| "goto"
+	| "click"
+	| "type"
+	| "fill"
+	| "select"
+	| "check"
+	| "uncheck"
+	| "hover"
+	| "drag"
+	| "upload"
+	| "scroll"
+	| "wait"
+	| "close"
+	| "snapshot"
+	| "screenshot"
+	| "pdf"
+	| "navigation"
+	| "tabs"
+	| "keyboard"
+	| "mouse";
 const DEFAULT_BROWSER_GUIDELINES = [
-	"Use only the `browser_*` tools for browser interaction. Do not attempt to use bash, read, edit, write, grep, find, or ls.",
-	"Start with `browser_goto`, then call `browser_snapshot` to collect fresh refs like `@e1` before acting.",
-	"Prefer ref-based interactions from `browser_snapshot`; fall back to selectors only when a ref is unavailable.",
-	"After actions that may change the page, call `browser_wait` or take a fresh `browser_snapshot` before the next structural action.",
-	"Use `browser_screenshot` only when visual context is needed. Set `annotate: true` when you want image labels that line up with refs.",
+	"Use only the `browser` tool for browser interaction. Do not attempt to use bash, read, edit, write, grep, find, or ls.",
+	"Prefer one `browser` call with a few predictable `steps` over many tiny calls.",
+	"Use a `snapshot` step to collect refs like `@e1` before ref-based actions, or when the page structure changes enough that old refs may be stale.",
+	"You do not need a `wait` or `snapshot` step after every page-changing action. Add `wait` when navigation, async rendering, or downloads need confirmation before the next step.",
+	"Use a `screenshot` step only when visual context is needed. Set `annotate: true` when you want image labels that line up with snapshot refs.",
 ];
 
 const BrowserProviderSchema = StringEnum(["ios", "browserbase", "kernel", "browseruse", "browserless", "agentcore"] as const, {
@@ -116,13 +117,16 @@ const BrowserCommandNames = [
 type BrowserCommandName = (typeof BrowserCommandNames)[number];
 
 interface BrowserToolDetails {
-	command: BrowserCommandName;
 	sessionName: string;
-	invocation: string[];
-	summary: string;
-	stdout?: string;
-	stderr?: string;
-	outputPath?: string;
+	steps: Array<{
+		type: BrowserStepType;
+		command: BrowserCommandName;
+		invocation: string[];
+		summary: string;
+		stdout?: string;
+		stderr?: string;
+		outputPath?: string;
+	}>;
 }
 
 interface ResolvedCli {
@@ -214,6 +218,118 @@ function toolSchema<TProperties extends Record<string, TSchema>>(properties: TPr
 	);
 }
 
+function browserStepSchema<TType extends BrowserStepType, TProperties extends Record<string, TSchema>>(type: TType, properties: TProperties) {
+	return Type.Object(
+		{
+			type: Type.Literal(type),
+			...properties,
+		},
+		{ additionalProperties: false },
+	);
+}
+
+const browserToolParameters = toolSchema({
+	steps: Type.Array(
+		Type.Union([
+			browserStepSchema("goto", {
+				url: Type.String({ description: "URL to navigate to." }),
+			}),
+			browserStepSchema("click", {
+				ref: Type.String({ description: "Element ref, CSS selector, XPath, or other agent-browser locator." }),
+				newTab: Type.Optional(Type.Boolean({ description: "Open a link target in a new tab instead of the current tab." })),
+			}),
+			browserStepSchema("type", {
+				text: Type.String({ description: "Text to type." }),
+				insertText: Type.Optional(Type.Boolean({ description: "Insert text without key events." })),
+			}),
+			browserStepSchema("fill", {
+				ref: Type.String({ description: "Element ref or selector to fill." }),
+				text: Type.String({ description: "Replacement text." }),
+			}),
+			browserStepSchema("select", {
+				ref: Type.String({ description: "Select element ref or selector." }),
+				value: Type.Optional(Type.String({ description: "Single option value to select." })),
+				values: Type.Optional(Type.Array(Type.String(), { minItems: 1, description: "One or more option values to select." })),
+			}),
+			browserStepSchema("check", {
+				ref: Type.String({ description: "Checkbox or radio ref or selector." }),
+			}),
+			browserStepSchema("uncheck", {
+				ref: Type.String({ description: "Checkbox ref or selector." }),
+			}),
+			browserStepSchema("hover", {
+				ref: Type.String({ description: "Element ref or selector to hover." }),
+			}),
+			browserStepSchema("drag", {
+				startRef: Type.String({ description: "Source element ref or selector." }),
+				endRef: Type.String({ description: "Target element ref or selector." }),
+			}),
+			browserStepSchema("upload", {
+				ref: Type.String({ description: "File input ref or selector." }),
+				files: Type.Array(Type.String(), { minItems: 1, description: "One or more file paths to upload." }),
+			}),
+			browserStepSchema("scroll", {
+				direction: Type.Optional(BrowserScrollDirectionSchema),
+				amount: Type.Optional(Type.Number({ description: "Optional number of pixels to scroll.", minimum: 0 })),
+				selector: Type.Optional(Type.String({ description: "Optional selector for a specific scrollable container." })),
+			}),
+			browserStepSchema("wait", {
+				ms: Type.Optional(Type.Number({ description: "Milliseconds to wait.", minimum: 0 })),
+				target: Type.Optional(Type.String({ description: "Element ref or selector to wait for." })),
+				text: Type.Optional(Type.String({ description: "Page text to wait for." })),
+				urlPattern: Type.Optional(Type.String({ description: "URL pattern to wait for." })),
+				loadState: Type.Optional(BrowserWaitLoadStateSchema),
+				expression: Type.Optional(Type.String({ description: "JavaScript expression to wait for." })),
+				waitState: Type.Optional(BrowserWaitStateSchema),
+				downloadPath: Type.Optional(Type.String({ description: "Path to save the next download to." })),
+				timeout: Type.Optional(Type.Number({ description: "Optional download timeout in milliseconds.", minimum: 0 })),
+			}),
+			browserStepSchema("close", {}),
+			browserStepSchema("snapshot", {
+				interactive: Type.Optional(Type.Boolean({ description: "Only include interactive elements." })),
+				urls: Type.Optional(Type.Boolean({ description: "Include href URLs for links in the snapshot." })),
+				compact: Type.Optional(Type.Boolean({ description: "Remove empty structural elements." })),
+				depth: Type.Optional(Type.Number({ description: "Optional maximum tree depth.", minimum: 1 })),
+				selector: Type.Optional(Type.String({ description: "Optional selector to scope the snapshot." })),
+			}),
+			browserStepSchema("screenshot", {
+				ref: Type.Optional(Type.String({ description: "Optional element ref or selector for an element screenshot." })),
+				full: Type.Optional(Type.Boolean({ description: "Capture the full page instead of only the viewport." })),
+				annotate: Type.Optional(Type.Boolean({ description: "Overlay numbered labels that line up with snapshot refs." })),
+			}),
+			browserStepSchema("pdf", {}),
+			browserStepSchema("navigation", {
+				action: BrowserNavigationActionSchema,
+			}),
+			browserStepSchema("tabs", {
+				action: BrowserTabsActionSchema,
+				url: Type.Optional(Type.String({ description: "Optional URL for `new`." })),
+				index: Type.Optional(Type.Number({ description: "Tab index for `select`. Optional for `close`.", minimum: 0 })),
+			}),
+			browserStepSchema("keyboard", {
+				action: BrowserKeyboardActionSchema,
+				key: Type.String({ description: "Keyboard key name, such as Enter or ArrowDown." }),
+			}),
+			browserStepSchema("mouse", {
+				action: BrowserMouseActionSchema,
+				x: Type.Optional(Type.Number({ description: "X coordinate for `move`." })),
+				y: Type.Optional(Type.Number({ description: "Y coordinate for `move`." })),
+				button: Type.Optional(MouseButtonSchema),
+				dx: Type.Optional(Type.Number({ description: "Optional horizontal wheel delta for `wheel`." })),
+				dy: Type.Optional(Type.Number({ description: "Vertical wheel delta for `wheel`." })),
+			}),
+		]),
+		{
+			minItems: 1,
+			maxItems: 16,
+			description: "Browser steps to execute sequentially in one tool call.",
+		},
+	),
+});
+
+type BrowserToolCallParams = Static<typeof browserToolParameters>;
+type BrowserStep = BrowserToolCallParams["steps"][number];
+
 type BrowserSharedParams = {
 	session?: string;
 	headed?: boolean;
@@ -269,7 +385,7 @@ type BrowserToolParams = BrowserSharedParams & {
 };
 
 function shouldBlockTool(event: ToolCallEvent): boolean {
-	return !ACTIVE_BROWSER_TOOL_NAMES.includes(event.toolName as (typeof ACTIVE_BROWSER_TOOL_NAMES)[number]);
+	return event.toolName !== BROWSER_TOOL_NAME;
 }
 
 function sanitizeSessionName(value: string): string {
@@ -280,7 +396,7 @@ function sanitizeSessionName(value: string): string {
 		.slice(0, 48);
 }
 
-function getSessionName(ctx: ExtensionContext, params: BrowserToolParams): string {
+function getSessionName(ctx: ExtensionContext, params: BrowserSharedParams): string {
 	if (params.session) {
 		return params.session;
 	}
@@ -788,12 +904,12 @@ async function readImage(path: string): Promise<ImageContent> {
 	return { type: "image", mimeType: "image/png", data };
 }
 
-function formatContent(summary: string, stdout?: string, stderr?: string, snapshot?: string): TextContent {
-	const sections = [summary];
+function formatStepContent(stepNumber: number, summary: string, stdout?: string, stderr?: string, snapshot?: string): string {
+	const sections = [`${stepNumber}. ${summary}`];
 	if (stdout) sections.push(`Output:\n${stdout}`);
 	if (stderr) sections.push(`Warnings:\n${stderr}`);
 	if (snapshot) sections.push(`Snapshot:\n${snapshot}`);
-	return { type: "text", text: sections.join("\n\n") };
+	return sections.join("\n\n");
 }
 
 async function runBrowserTool(
@@ -801,7 +917,7 @@ async function runBrowserTool(
 	state: DriverState,
 	ctx: ExtensionContext,
 	toolCallId: string,
-	params: BrowserToolParams,
+	params: BrowserToolCallParams,
 ): Promise<{ content: (TextContent | ImageContent)[]; details: BrowserToolDetails }> {
 	if (state.activeToolCallId && state.activeToolCallId !== toolCallId) {
 		throw new Error("Browser tool does not allow parallel execution.");
@@ -809,25 +925,37 @@ async function runBrowserTool(
 	state.activeToolCallId = toolCallId;
 	try {
 		await mkdir(outputDir(ctx.cwd), { recursive: true });
-		const sessionName = getSessionName(ctx, params);
-		const prepared = buildCommand(params, sessionName, toolCallId, ctx.cwd);
-		const output = await execCli(pi, state, ctx, prepared.argv);
-		const sections = extractResponseSections(output.response, output.stdout, output.stderr, prepared);
-		let image: ImageContent | undefined;
-		if (params.command === "screenshot" && prepared.outputPath) {
-			image = await readImage(prepared.outputPath);
-		}
+		const shared = getSharedParams(params);
+		const sessionName = getSessionName(ctx, shared);
 		const details: BrowserToolDetails = {
-			command: params.command,
 			sessionName,
-			invocation: prepared.argv,
-			summary: prepared.summary,
-			stdout: sections.output,
-			stderr: sections.warnings,
-			outputPath: prepared.outputPath,
+			steps: [],
 		};
-		const content: (TextContent | ImageContent)[] = [formatContent(prepared.summary, sections.output, sections.warnings, sections.snapshot)];
-		if (image) content.push(image);
+		const contentSections: string[] = [];
+		let image: ImageContent | undefined;
+		for (const [index, step] of params.steps.entries()) {
+			const stepParams = toBrowserParams(step, shared);
+			const prepared = buildCommand(stepParams, sessionName, `${toolCallId}-${index + 1}`, ctx.cwd);
+			const output = await execCli(pi, state, ctx, prepared.argv);
+			const sections = extractResponseSections(output.response, output.stdout, output.stderr, prepared);
+			if (step.type === "screenshot" && prepared.outputPath) {
+				image = await readImage(prepared.outputPath);
+			}
+			details.steps.push({
+				type: step.type,
+				command: stepParams.command,
+				invocation: prepared.argv,
+				summary: prepared.summary,
+				stdout: sections.output,
+				stderr: sections.warnings,
+				outputPath: prepared.outputPath,
+			});
+			contentSections.push(formatStepContent(index + 1, prepared.summary, sections.output, sections.warnings, sections.snapshot));
+		}
+		const content: (TextContent | ImageContent)[] = [{ type: "text", text: contentSections.join("\n\n") }];
+		if (image) {
+			content.push(image);
+		}
 		return { content, details };
 	} finally {
 		if (state.activeToolCallId === toolCallId) {
@@ -854,388 +982,187 @@ function getSharedParams(params: BrowserSharedParams): BrowserSharedParams {
 	};
 }
 
-function registerBrowserTool<TParams extends TSchema>(
-	pi: ExtensionAPI,
-	state: DriverState,
-	config: {
-		name: string;
-		label: string;
-		description: string;
-		promptSnippet?: string;
-		parameters: TParams;
-		toBrowserParams: (params: Static<TParams>) => BrowserToolParams;
-	},
-): void {
-	pi.registerTool({
-		name: config.name,
-		label: config.label,
-		description: config.description,
-		promptSnippet: config.promptSnippet ?? config.description,
-		promptGuidelines: DEFAULT_BROWSER_GUIDELINES,
-		parameters: config.parameters,
-		async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-			return runBrowserTool(pi, state, ctx, toolCallId, config.toBrowserParams(params));
-		},
-	});
+function toBrowserParams(step: BrowserStep, shared: BrowserSharedParams): BrowserToolParams {
+	switch (step.type) {
+		case "goto":
+			return {
+				...shared,
+				command: "goto",
+				url: step.url,
+			};
+		case "click":
+			return {
+				...shared,
+				command: "click",
+				ref: step.ref,
+				newTab: step.newTab,
+			};
+		case "type":
+			return {
+				...shared,
+				command: "type",
+				text: step.text,
+				insertText: step.insertText,
+			};
+		case "fill":
+			return {
+				...shared,
+				command: "fill",
+				ref: step.ref,
+				text: step.text,
+			};
+		case "select":
+			return {
+				...shared,
+				command: "select",
+				ref: step.ref,
+				value: step.value,
+				values: step.values,
+			};
+		case "check":
+			return {
+				...shared,
+				command: "check",
+				ref: step.ref,
+			};
+		case "uncheck":
+			return {
+				...shared,
+				command: "uncheck",
+				ref: step.ref,
+			};
+		case "hover":
+			return {
+				...shared,
+				command: "hover",
+				ref: step.ref,
+			};
+		case "drag":
+			return {
+				...shared,
+				command: "drag",
+				startRef: step.startRef,
+				endRef: step.endRef,
+			};
+		case "upload":
+			return {
+				...shared,
+				command: "upload",
+				ref: step.ref,
+				files: step.files,
+			};
+		case "scroll":
+			return {
+				...shared,
+				command: "scroll",
+				direction: step.direction,
+				amount: step.amount,
+				selector: step.selector,
+			};
+		case "wait":
+			return {
+				...shared,
+				command: "wait",
+				ms: step.ms,
+				target: step.target,
+				text: step.text,
+				urlPattern: step.urlPattern,
+				loadState: step.loadState,
+				expression: step.expression,
+				waitState: step.waitState,
+				downloadPath: step.downloadPath,
+				timeout: step.timeout,
+			};
+		case "close":
+			return {
+				...shared,
+				command: "close",
+			};
+		case "snapshot":
+			return {
+				...shared,
+				command: "snapshot",
+				interactive: step.interactive,
+				urls: step.urls,
+				compact: step.compact,
+				depth: step.depth,
+				selector: step.selector,
+			};
+		case "screenshot":
+			return {
+				...shared,
+				command: "screenshot",
+				ref: step.ref,
+				full: step.full,
+				annotate: step.annotate,
+			};
+		case "pdf":
+			return {
+				...shared,
+				command: "pdf",
+			};
+		case "navigation":
+			return {
+				...shared,
+				command: step.action === "back" ? "go-back" : step.action === "forward" ? "go-forward" : "reload",
+			};
+		case "tabs":
+			switch (step.action) {
+				case "list":
+					return { ...shared, command: "tab-list" };
+				case "new":
+					return { ...shared, command: "tab-new", url: step.url };
+				case "select":
+					if (step.index === undefined) {
+						throw new Error("browser steps `tabs` with action `select` requires `index`.");
+					}
+					return { ...shared, command: "tab-select", index: step.index };
+				case "close":
+					return { ...shared, command: "tab-close", index: step.index };
+			}
+		case "keyboard":
+			return {
+				...shared,
+				command: step.action === "press" ? "press" : step.action === "down" ? "keydown" : "keyup",
+				key: step.key,
+			};
+		case "mouse":
+			switch (step.action) {
+				case "move":
+					if (step.x === undefined || step.y === undefined) {
+						throw new Error("browser steps `mouse` with action `move` requires `x` and `y`.");
+					}
+					return { ...shared, command: "mousemove", x: step.x, y: step.y };
+				case "down":
+					return { ...shared, command: "mousedown", button: step.button };
+				case "up":
+					return { ...shared, command: "mouseup", button: step.button };
+				case "wheel":
+					if (step.dy === undefined) {
+						throw new Error("browser steps `mouse` with action `wheel` requires `dy`.");
+					}
+					return { ...shared, command: "mousewheel", dx: step.dx, dy: step.dy };
+			}
+	}
 }
 
 export default function registerBrowserUseExtension(pi: ExtensionAPI): void {
 	const state: DriverState = {};
 
-	registerBrowserTool(pi, state, {
-		name: BROWSER_TOOL_NAMES.goto,
-		label: "Browser Goto",
-		description: "Navigate the current browser session to a URL with agent-browser.",
-		parameters: toolSchema({
-			url: Type.String({ description: "URL to navigate to." }),
-		}),
-		toBrowserParams: (params) => ({
-			...getSharedParams(params),
-			command: "goto",
-			url: params.url,
-		}),
-	});
-
-	registerBrowserTool(pi, state, {
-		name: BROWSER_TOOL_NAMES.click,
-		label: "Browser Click",
-		description: "Click an element by ref or selector.",
-		parameters: toolSchema({
-			ref: Type.String({ description: "Element ref, CSS selector, XPath, or other agent-browser locator." }),
-			newTab: Type.Optional(Type.Boolean({ description: "Open a link target in a new tab instead of the current tab." })),
-		}),
-		toBrowserParams: (params) => ({
-			...getSharedParams(params),
-			command: "click",
-			ref: params.ref,
-			newTab: params.newTab,
-		}),
-	});
-
-	registerBrowserTool(pi, state, {
-		name: BROWSER_TOOL_NAMES.type,
-		label: "Browser Type",
-		description: "Type text into the currently focused element.",
-		parameters: toolSchema({
-			text: Type.String({ description: "Text to type." }),
-			insertText: Type.Optional(Type.Boolean({ description: "Insert text without key events." })),
-		}),
-		toBrowserParams: (params) => ({
-			...getSharedParams(params),
-			command: "type",
-			text: params.text,
-			insertText: params.insertText,
-		}),
-	});
-
-	registerBrowserTool(pi, state, {
-		name: BROWSER_TOOL_NAMES.fill,
-		label: "Browser Fill",
-		description: "Fill an input or editable element with replacement text.",
-		parameters: toolSchema({
-			ref: Type.String({ description: "Element ref or selector to fill." }),
-			text: Type.String({ description: "Replacement text." }),
-		}),
-		toBrowserParams: (params) => ({
-			...getSharedParams(params),
-			command: "fill",
-			ref: params.ref,
-			text: params.text,
-		}),
-	});
-
-	registerBrowserTool(pi, state, {
-		name: BROWSER_TOOL_NAMES.select,
-		label: "Browser Select",
-		description: "Select one or more values in a dropdown.",
-		parameters: toolSchema({
-			ref: Type.String({ description: "Select element ref or selector." }),
-			value: Type.Optional(Type.String({ description: "Single option value to select." })),
-			values: Type.Optional(Type.Array(Type.String(), { minItems: 1, description: "One or more option values to select." })),
-		}),
-		toBrowserParams: (params) => ({
-			...getSharedParams(params),
-			command: "select",
-			ref: params.ref,
-			value: params.value,
-			values: params.values,
-		}),
-	});
-
-	registerBrowserTool(pi, state, {
-		name: BROWSER_TOOL_NAMES.check,
-		label: "Browser Check",
-		description: "Check a checkbox or radio button.",
-		parameters: toolSchema({
-			ref: Type.String({ description: "Checkbox or radio ref or selector." }),
-		}),
-		toBrowserParams: (params) => ({
-			...getSharedParams(params),
-			command: "check",
-			ref: params.ref,
-		}),
-	});
-
-	registerBrowserTool(pi, state, {
-		name: BROWSER_TOOL_NAMES.uncheck,
-		label: "Browser Uncheck",
-		description: "Uncheck a checkbox.",
-		parameters: toolSchema({
-			ref: Type.String({ description: "Checkbox ref or selector." }),
-		}),
-		toBrowserParams: (params) => ({
-			...getSharedParams(params),
-			command: "uncheck",
-			ref: params.ref,
-		}),
-	});
-
-	registerBrowserTool(pi, state, {
-		name: BROWSER_TOOL_NAMES.hover,
-		label: "Browser Hover",
-		description: "Hover over an element.",
-		parameters: toolSchema({
-			ref: Type.String({ description: "Element ref or selector to hover." }),
-		}),
-		toBrowserParams: (params) => ({
-			...getSharedParams(params),
-			command: "hover",
-			ref: params.ref,
-		}),
-	});
-
-	registerBrowserTool(pi, state, {
-		name: BROWSER_TOOL_NAMES.drag,
-		label: "Browser Drag",
-		description: "Drag from one element to another.",
-		parameters: toolSchema({
-			startRef: Type.String({ description: "Source element ref or selector." }),
-			endRef: Type.String({ description: "Target element ref or selector." }),
-		}),
-		toBrowserParams: (params) => ({
-			...getSharedParams(params),
-			command: "drag",
-			startRef: params.startRef,
-			endRef: params.endRef,
-		}),
-	});
-
-	registerBrowserTool(pi, state, {
-		name: BROWSER_TOOL_NAMES.upload,
-		label: "Browser Upload",
-		description: "Upload one or more files to a file input.",
-		parameters: toolSchema({
-			ref: Type.String({ description: "File input ref or selector." }),
-			files: Type.Array(Type.String(), { minItems: 1, description: "One or more file paths to upload." }),
-		}),
-		toBrowserParams: (params) => ({
-			...getSharedParams(params),
-			command: "upload",
-			ref: params.ref,
-			files: params.files,
-		}),
-	});
-
-	registerBrowserTool(pi, state, {
-		name: BROWSER_TOOL_NAMES.scroll,
-		label: "Browser Scroll",
-		description: "Scroll the page or a specific scrollable container.",
-		parameters: toolSchema({
-			direction: Type.Optional(BrowserScrollDirectionSchema),
-			amount: Type.Optional(Type.Number({ description: "Optional number of pixels to scroll.", minimum: 0 })),
-			selector: Type.Optional(Type.String({ description: "Optional selector for a specific scrollable container." })),
-		}),
-		toBrowserParams: (params) => ({
-			...getSharedParams(params),
-			command: "scroll",
-			direction: params.direction,
-			amount: params.amount,
-			selector: params.selector,
-		}),
-	});
-
-	registerBrowserTool(pi, state, {
-		name: BROWSER_TOOL_NAMES.wait,
-		label: "Browser Wait",
-		description: "Wait for time, page text, a URL pattern, an element, a load state, or a download.",
-		parameters: toolSchema({
-			ms: Type.Optional(Type.Number({ description: "Milliseconds to wait.", minimum: 0 })),
-			target: Type.Optional(Type.String({ description: "Element ref or selector to wait for." })),
-			text: Type.Optional(Type.String({ description: "Page text to wait for." })),
-			urlPattern: Type.Optional(Type.String({ description: "URL pattern to wait for." })),
-			loadState: Type.Optional(BrowserWaitLoadStateSchema),
-			expression: Type.Optional(Type.String({ description: "JavaScript expression to wait for." })),
-			waitState: Type.Optional(BrowserWaitStateSchema),
-			downloadPath: Type.Optional(Type.String({ description: "Path to save the next download to." })),
-			timeout: Type.Optional(Type.Number({ description: "Optional download timeout in milliseconds.", minimum: 0 })),
-		}),
-		toBrowserParams: (params) => ({
-			...getSharedParams(params),
-			command: "wait",
-			ms: params.ms,
-			target: params.target,
-			text: params.text,
-			urlPattern: params.urlPattern,
-			loadState: params.loadState,
-			expression: params.expression,
-			waitState: params.waitState,
-			downloadPath: params.downloadPath,
-			timeout: params.timeout,
-		}),
-	});
-
-	registerBrowserTool(pi, state, {
-		name: BROWSER_TOOL_NAMES.close,
-		label: "Browser Close",
-		description: "Close the browser session.",
-		parameters: toolSchema({}),
-		toBrowserParams: (params) => ({
-			...getSharedParams(params),
-			command: "close",
-		}),
-	});
-
-	registerBrowserTool(pi, state, {
-		name: BROWSER_TOOL_NAMES.snapshot,
-		label: "Browser Snapshot",
-		description: "Capture an accessibility snapshot of the current page with refs.",
-		parameters: toolSchema({
-			interactive: Type.Optional(Type.Boolean({ description: "Only include interactive elements." })),
-			urls: Type.Optional(Type.Boolean({ description: "Include href URLs for links in the snapshot." })),
-			compact: Type.Optional(Type.Boolean({ description: "Remove empty structural elements." })),
-			depth: Type.Optional(Type.Number({ description: "Optional maximum tree depth.", minimum: 1 })),
-			selector: Type.Optional(Type.String({ description: "Optional selector to scope the snapshot." })),
-		}),
-		toBrowserParams: (params) => ({
-			...getSharedParams(params),
-			command: "snapshot",
-			interactive: params.interactive,
-			urls: params.urls,
-			compact: params.compact,
-			depth: params.depth,
-			selector: params.selector,
-		}),
-	});
-
-	registerBrowserTool(pi, state, {
-		name: BROWSER_TOOL_NAMES.screenshot,
-		label: "Browser Screenshot",
-		description: "Capture a screenshot of the current page or an element.",
-		parameters: toolSchema({
-			ref: Type.Optional(Type.String({ description: "Optional element ref or selector for an element screenshot." })),
-			full: Type.Optional(Type.Boolean({ description: "Capture the full page instead of only the viewport." })),
-			annotate: Type.Optional(Type.Boolean({ description: "Overlay numbered labels that line up with snapshot refs." })),
-		}),
-		toBrowserParams: (params) => ({
-			...getSharedParams(params),
-			command: "screenshot",
-			ref: params.ref,
-			full: params.full,
-			annotate: params.annotate,
-		}),
-	});
-
-	registerBrowserTool(pi, state, {
-		name: BROWSER_TOOL_NAMES.pdf,
-		label: "Browser PDF",
-		description: "Save the current page as a PDF.",
-		parameters: toolSchema({}),
-		toBrowserParams: (params) => ({
-			...getSharedParams(params),
-			command: "pdf",
-		}),
-	});
-
-	registerBrowserTool(pi, state, {
-		name: BROWSER_TOOL_NAMES.navigation,
-		label: "Browser Navigation",
-		description: "Go back, go forward, or reload the current page.",
-		parameters: toolSchema({
-			action: BrowserNavigationActionSchema,
-		}),
-		toBrowserParams: (params) => ({
-			...getSharedParams(params),
-			command: params.action === "back" ? "go-back" : params.action === "forward" ? "go-forward" : "reload",
-		}),
-	});
-
-	registerBrowserTool(pi, state, {
-		name: BROWSER_TOOL_NAMES.tabs,
-		label: "Browser Tabs",
-		description: "List, create, select, or close browser tabs.",
-		parameters: toolSchema({
-			action: BrowserTabsActionSchema,
-			url: Type.Optional(Type.String({ description: "Optional URL for `new`." })),
-			index: Type.Optional(Type.Number({ description: "Tab index for `select`. Optional for `close`.", minimum: 0 })),
-		}),
-		toBrowserParams: (params) => {
-			const shared = getSharedParams(params);
-			switch (params.action) {
-				case "list":
-					return { ...shared, command: "tab-list" };
-				case "new":
-					return { ...shared, command: "tab-new", url: params.url };
-				case "select":
-					if (params.index === undefined) {
-						throw new Error("browser_tabs with action `select` requires `index`.");
-					}
-					return { ...shared, command: "tab-select", index: params.index };
-				case "close":
-					return { ...shared, command: "tab-close", index: params.index };
-			}
-		},
-	});
-
-	registerBrowserTool(pi, state, {
-		name: BROWSER_TOOL_NAMES.keyboard,
-		label: "Browser Keyboard",
-		description: "Press, hold down, or release a keyboard key.",
-		parameters: toolSchema({
-			action: BrowserKeyboardActionSchema,
-			key: Type.String({ description: "Keyboard key name, such as Enter or ArrowDown." }),
-		}),
-		toBrowserParams: (params) => ({
-			...getSharedParams(params),
-			command: params.action === "press" ? "press" : params.action === "down" ? "keydown" : "keyup",
-			key: params.key,
-		}),
-	});
-
-	registerBrowserTool(pi, state, {
-		name: BROWSER_TOOL_NAMES.mouse,
-		label: "Browser Mouse",
-		description: "Move the mouse, press or release a button, or scroll the wheel.",
-		parameters: toolSchema({
-			action: BrowserMouseActionSchema,
-			x: Type.Optional(Type.Number({ description: "X coordinate for `move`." })),
-			y: Type.Optional(Type.Number({ description: "Y coordinate for `move`." })),
-			button: Type.Optional(MouseButtonSchema),
-			dx: Type.Optional(Type.Number({ description: "Optional horizontal wheel delta for `wheel`." })),
-			dy: Type.Optional(Type.Number({ description: "Vertical wheel delta for `wheel`." })),
-		}),
-		toBrowserParams: (params) => {
-			const shared = getSharedParams(params);
-			switch (params.action) {
-				case "move":
-					if (params.x === undefined || params.y === undefined) {
-						throw new Error("browser_mouse with action `move` requires `x` and `y`.");
-					}
-					return { ...shared, command: "mousemove", x: params.x, y: params.y };
-				case "down":
-					return { ...shared, command: "mousedown", button: params.button };
-				case "up":
-					return { ...shared, command: "mouseup", button: params.button };
-				case "wheel":
-					if (params.dy === undefined) {
-						throw new Error("browser_mouse with action `wheel` requires `dy`.");
-					}
-					return { ...shared, command: "mousewheel", dx: params.dx, dy: params.dy };
-			}
+	pi.registerTool({
+		name: BROWSER_TOOL_NAME,
+		label: "Browser",
+		description: "Interact with the browser by executing one or more sequential steps with agent-browser.",
+		promptSnippet: DEFAULT_BROWSER_PROMPT_SNIPPET,
+		promptGuidelines: DEFAULT_BROWSER_GUIDELINES,
+		parameters: browserToolParameters,
+		async execute(toolCallId, params, _signal, _onUpdate, ctx) {
+			return runBrowserTool(pi, state, ctx, toolCallId, params);
 		},
 	});
 
 	pi.on("session_start", () => {
-		pi.setActiveTools(ACTIVE_BROWSER_TOOL_NAMES);
+		pi.setActiveTools([BROWSER_TOOL_NAME]);
 	});
 
 	pi.on("tool_call", async (event) => {
