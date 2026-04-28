@@ -4,6 +4,7 @@
 
 ### Changed
 
+- Changed `pi --mode json` to output only completed assistant-turn messages instead of streaming session events.
 - Changed Pi version checks to identify Pi with a `pi/<version>` user agent.
 
 ### Fixed

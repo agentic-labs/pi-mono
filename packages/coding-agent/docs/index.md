@@ -44,7 +44,7 @@ For the full first-run flow, see [Quickstart](quickstart.md).
 
 - [SDK](sdk.md) - embed pi in Node.js applications.
 - [RPC mode](rpc.md) - integrate over stdin/stdout JSONL.
-- [JSON event stream mode](json.md) - print mode with structured events.
+- [JSON assistant message mode](json.md) - print mode with structured assistant-turn output.
 - [TUI components](tui.md) - build custom terminal UI for extensions.
 
 ## Reference

@@ -145,7 +145,7 @@ See [Pi Packages](packages.md) for package sources and security notes.
 |------|-------------|
 | default | Interactive mode |
 | `-p`, `--print` | Print response and exit |
-| `--mode json` | Output all events as JSON lines; see [JSON mode](json.md) |
+| `--mode json` | Output completed assistant-turn messages as JSON lines; see [JSON mode](json.md) |
 | `--mode rpc` | RPC mode over stdin/stdout; see [RPC mode](rpc.md) |
 | `--export <in> [out]` | Export a session to HTML |
 
