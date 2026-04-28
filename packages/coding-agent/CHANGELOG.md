@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed Cloudflare Workers AI attribution headers to honor the install telemetry setting.
+- Fixed `pi update --self` detection and execution for Windows package-manager shim installs, including symlinked global package roots, and print the manual fallback command when self-update fails. ([#3857](https://github.com/badlogic/pi-mono/issues/3857))
 
 ## [0.70.5] - 2026-04-27
 

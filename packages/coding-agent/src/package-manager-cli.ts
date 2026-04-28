@@ -271,6 +271,12 @@ function printSelfUpdateUnavailable(): void {
 	}
 }
 
+function printSelfUpdateFallback(): void {
+	const command = getSelfUpdateCommand(PACKAGE_NAME);
+	if (!command) return;
+	console.error(chalk.dim(`If this keeps failing, run this command yourself: ${command.display}`));
+}
+
 async function runSelfUpdate(): Promise<void> {
 	const command = getSelfUpdateCommand(PACKAGE_NAME);
 	if (!command) {
@@ -281,7 +287,9 @@ async function runSelfUpdate(): Promise<void> {
 
 	console.log(chalk.dim(`Updating ${APP_NAME} with ${command.display}...`));
 	await new Promise<void>((resolve, reject) => {
-		const child = spawn(command.command, command.args, { stdio: "inherit" });
+		// Windows package managers are commonly .cmd shims. Use the shell so Node can execute them;
+		// command and args come from getSelfUpdateCommandForMethod(), not user input.
+		const child = spawn(command.command, command.args, { stdio: "inherit", shell: process.platform === "win32" });
 		child.on("error", (error) => {
 			reject(error);
 		});
@@ -451,7 +459,15 @@ export async function handlePackageCommand(args: string[]): Promise<boolean> {
 				}
 				if (updateTargetIncludesSelf(target)) {
 					if (canSelfUpdate()) {
-						await runSelfUpdate();
+						try {
+							await runSelfUpdate();
+						} catch (error: unknown) {
+							const message = error instanceof Error ? error.message : "Unknown package command error";
+							console.error(chalk.red(`Error: ${message}`));
+							printSelfUpdateFallback();
+							process.exitCode = 1;
+							return true;
+						}
 						console.log(chalk.green(`Updated ${APP_NAME}`));
 					} else {
 						printSelfUpdateUnavailable();
