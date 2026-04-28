@@ -7,15 +7,17 @@
  */
 
 import type { AssistantMessage, ImageContent } from "@mariozechner/pi-ai";
+import type { AgentSessionEvent } from "../core/agent-session.js";
 import type { AgentSessionRuntime } from "../core/agent-session-runtime.js";
 import { flushRawStdout, writeRawStdout } from "../core/output-guard.js";
 import { killTrackedDetachedChildren } from "../utils/shell.js";
+import { serializeJsonLine } from "./rpc/jsonl.js";
 
 /**
  * Options for print mode.
  */
 export interface PrintModeOptions {
-	/** Output mode: "text" for final response only, "json" for all events */
+	/** Output mode: "text" for final response text, "json" for complete transcript records as JSONL */
 	mode: "text" | "json";
 	/** Array of additional prompts to send after initialMessage */
 	messages?: string[];
@@ -23,6 +25,18 @@ export interface PrintModeOptions {
 	initialMessage?: string;
 	/** Images to attach to the initial message */
 	initialImages?: ImageContent[];
+}
+
+function writeJsonTranscriptRecord(event: AgentSessionEvent): void {
+	if (event.type === "agent_start") {
+		writeRawStdout(serializeJsonLine({ type: "agent_start" }));
+	} else if (event.type === "message_end" && event.message.role === "user") {
+		writeRawStdout(serializeJsonLine(event.message));
+	} else if (event.type === "turn_end" && event.message.role === "assistant") {
+		writeRawStdout(serializeJsonLine(event.message));
+	} else if (event.type === "agent_end") {
+		writeRawStdout(serializeJsonLine({ type: "agent_end" }));
+	}
 }
 
 /**
@@ -102,19 +116,12 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 		unsubscribe?.();
 		unsubscribe = session.subscribe((event) => {
 			if (mode === "json") {
-				writeRawStdout(`${JSON.stringify(event)}\n`);
+				writeJsonTranscriptRecord(event);
 			}
 		});
 	};
 
 	try {
-		if (mode === "json") {
-			const header = session.sessionManager.getHeader();
-			if (header) {
-				writeRawStdout(`${JSON.stringify(header)}\n`);
-			}
-		}
-
 		await rebindSession();
 
 		if (initialMessage) {
