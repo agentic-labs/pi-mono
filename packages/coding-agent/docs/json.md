@@ -10,7 +10,8 @@ Outputs a compact transcript as JSON lines. Streaming deltas, tool execution eve
 
 - `{"type":"agent_start"}` when a run starts.
 - Complete `UserMessage` objects when user messages are accepted.
-- Complete `AssistantMessage` objects after each assistant turn completes.
+- Complete `AssistantMessage` objects when assistant messages finish.
+- Complete `ToolResultMessage` objects when tool results are available.
 - `{"type":"agent_end"}` when a run ends.
 
 ## Output Format
@@ -21,10 +22,11 @@ Each line is one transcript record:
 {"type":"agent_start"}
 {"role":"user","content":"Hello","timestamp":...}
 {"role":"assistant","content":[{"type":"text","text":"Hello"}],"provider":"openai","model":"gpt-4o-mini","stopReason":"stop",...}
+{"role":"toolResult","toolCallId":"call_123","toolName":"read","content":[{"type":"text","text":"..."}],"isError":false,"timestamp":...}
 {"type":"agent_end"}
 ```
 
-Runs with multiple assistant turns output one completed assistant-turn message per turn.
+Runs with tool calls output the assistant message that requested the tool, followed by the resulting tool-result message.
 
 For a persistent protocol with streaming events and command responses, use [`--mode rpc`](rpc.md).
 

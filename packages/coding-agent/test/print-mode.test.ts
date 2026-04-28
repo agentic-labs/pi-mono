@@ -1,4 +1,4 @@
-import type { AssistantMessage, ImageContent, UserMessage } from "@mariozechner/pi-ai";
+import type { AssistantMessage, ImageContent, ToolResultMessage, UserMessage } from "@mariozechner/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentSessionEvent, AgentSessionEventListener, SessionShutdownEvent } from "../src/index.js";
 import { runPrintMode } from "../src/modes/print-mode.js";
@@ -59,6 +59,17 @@ function createUserMessage(text: string): UserMessage {
 	return {
 		role: "user",
 		content: text,
+		timestamp: Date.now(),
+	};
+}
+
+function createToolResultMessage(): ToolResultMessage {
+	return {
+		role: "toolResult",
+		toolCallId: "call-1",
+		toolName: "read",
+		content: [{ type: "text", text: "tool output" }],
+		isError: false,
 		timestamp: Date.now(),
 	};
 }
@@ -157,10 +168,11 @@ describe("runPrintMode", () => {
 	});
 
 	it("outputs only transcript records in json mode", async () => {
-		const assistantMessage = createAssistantMessage({ text: "done" });
-		const messageEndAssistantMessage = createAssistantMessage({ text: "message end" });
+		const assistantMessage = createAssistantMessage({ text: "message end" });
+		const turnEndAssistantMessage = createAssistantMessage({ text: "turn end" });
 		const partialMessage = createAssistantMessage({ text: "do" });
 		const userMessage = createUserMessage("hello");
+		const toolResultMessage = createToolResultMessage();
 		const runtimeHost = createRuntimeHost(assistantMessage, [
 			{ type: "agent_start" },
 			{ type: "turn_start" },
@@ -172,9 +184,12 @@ describe("runPrintMode", () => {
 				assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "ne", partial: partialMessage },
 			},
 			{ type: "message_end", message: userMessage },
-			{ type: "message_end", message: messageEndAssistantMessage },
-			{ type: "turn_end", message: assistantMessage, toolResults: [] },
-			{ type: "agent_end", messages: [userMessage, assistantMessage] },
+			{ type: "message_end", message: assistantMessage },
+			{ type: "tool_execution_start", toolCallId: "call-1", toolName: "read", args: {} },
+			{ type: "message_start", message: toolResultMessage },
+			{ type: "message_end", message: toolResultMessage },
+			{ type: "turn_end", message: turnEndAssistantMessage, toolResults: [toolResultMessage] },
+			{ type: "agent_end", messages: [userMessage, assistantMessage, toolResultMessage] },
 		]);
 		const stdout = captureStdout();
 
@@ -189,6 +204,7 @@ describe("runPrintMode", () => {
 			{ type: "agent_start" },
 			userMessage,
 			assistantMessage,
+			toolResultMessage,
 			{ type: "agent_end" },
 		]);
 	});
