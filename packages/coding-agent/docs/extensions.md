@@ -2459,7 +2459,7 @@ const highlighted = highlightCode(code, lang, theme);
 |------|-----------|-------|
 | Interactive | Full TUI | Normal operation |
 | RPC (`--mode rpc`) | JSON protocol | Host handles UI, see [rpc.md](rpc.md) |
-| JSON (`--mode json`) | No-op | Completed assistant-turn messages to stdout, see [json.md](json.md) |
+| JSON (`--mode json`) | No-op | Compact transcript to stdout, see [json.md](json.md) |
 | Print (`-p`) | No-op | Extensions run but can't prompt |
 
 In non-interactive modes, check `ctx.hasUI` before using UI methods.

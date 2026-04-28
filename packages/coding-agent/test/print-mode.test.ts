@@ -156,7 +156,7 @@ describe("runPrintMode", () => {
 		expect(session.extensionRunner.emit).toHaveBeenCalledWith({ type: "session_shutdown", reason: "quit" });
 	});
 
-	it("outputs only complete assistant messages in json mode", async () => {
+	it("outputs only transcript records in json mode", async () => {
 		const assistantMessage = createAssistantMessage({ text: "done" });
 		const messageEndAssistantMessage = createAssistantMessage({ text: "message end" });
 		const partialMessage = createAssistantMessage({ text: "do" });
@@ -185,11 +185,12 @@ describe("runPrintMode", () => {
 
 		const lines = stdout.join("").split("\n").filter(Boolean);
 		expect(exitCode).toBe(0);
-		expect(lines).toHaveLength(1);
-		expect(JSON.parse(lines[0])).toMatchObject({
-			role: "assistant",
-			content: [{ type: "text", text: "done" }],
-		});
+		expect(lines.map((line) => JSON.parse(line))).toEqual([
+			{ type: "agent_start" },
+			userMessage,
+			assistantMessage,
+			{ type: "agent_end" },
+		]);
 	});
 
 	it("emits session_shutdown and returns non-zero on assistant error", async () => {

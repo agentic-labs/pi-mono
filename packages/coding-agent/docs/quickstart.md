@@ -129,7 +129,7 @@ cat README.md | pi -p "Summarize this text"
 pi -p @screenshot.png "What's in this image?"
 ```
 
-Use `--mode json` for JSON assistant-message output or `--mode rpc` for process integration.
+Use `--mode json` for JSON transcript output or `--mode rpc` for process integration.
 
 ## Next steps
 

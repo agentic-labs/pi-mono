@@ -17,7 +17,7 @@ import { serializeJsonLine } from "./rpc/jsonl.js";
  * Options for print mode.
  */
 export interface PrintModeOptions {
-	/** Output mode: "text" for final response text, "json" for finalized assistant messages as JSONL */
+	/** Output mode: "text" for final response text, "json" for complete transcript records as JSONL */
 	mode: "text" | "json";
 	/** Array of additional prompts to send after initialMessage */
 	messages?: string[];
@@ -27,9 +27,15 @@ export interface PrintModeOptions {
 	initialImages?: ImageContent[];
 }
 
-function writeJsonAssistantTurn(event: AgentSessionEvent): void {
-	if (event.type === "turn_end" && event.message.role === "assistant") {
+function writeJsonTranscriptRecord(event: AgentSessionEvent): void {
+	if (event.type === "agent_start") {
+		writeRawStdout(serializeJsonLine({ type: "agent_start" }));
+	} else if (event.type === "message_end" && event.message.role === "user") {
 		writeRawStdout(serializeJsonLine(event.message));
+	} else if (event.type === "turn_end" && event.message.role === "assistant") {
+		writeRawStdout(serializeJsonLine(event.message));
+	} else if (event.type === "agent_end") {
+		writeRawStdout(serializeJsonLine({ type: "agent_end" }));
 	}
 }
 
@@ -110,7 +116,7 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 		unsubscribe?.();
 		unsubscribe = session.subscribe((event) => {
 			if (mode === "json") {
-				writeJsonAssistantTurn(event);
+				writeJsonTranscriptRecord(event);
 			}
 		});
 	};
