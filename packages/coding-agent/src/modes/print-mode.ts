@@ -30,9 +30,10 @@ export interface PrintModeOptions {
 function writeJsonTranscriptRecord(event: AgentSessionEvent): void {
 	if (event.type === "agent_start") {
 		writeRawStdout(serializeJsonLine({ type: "agent_start" }));
-	} else if (event.type === "message_end" && event.message.role === "user") {
-		writeRawStdout(serializeJsonLine(event.message));
-	} else if (event.type === "turn_end" && event.message.role === "assistant") {
+	} else if (
+		event.type === "message_end" &&
+		(event.message.role === "user" || event.message.role === "assistant" || event.message.role === "toolResult")
+	) {
 		writeRawStdout(serializeJsonLine(event.message));
 	} else if (event.type === "agent_end") {
 		writeRawStdout(serializeJsonLine({ type: "agent_end" }));
