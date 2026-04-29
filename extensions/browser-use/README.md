@@ -1,17 +1,22 @@
 # browser-use
 
-Minimal pi extension that enforces browser-only mode and routes a single `browser` tool through [`agent-browser`](https://github.com/vercel-labs/agent-browser).
+Minimal pi extension that enforces browser-only mode and exposes a single Playwright-backed `browser` tool.
+
+The tool is text-only: it observes Chromium through the raw CDP accessibility tree, filters it into compact refs, and performs actions against those refs. It does not use screenshots, vision, or model-predicted screen coordinates.
 
 ## Requirements
 
-Install `agent-browser` first:
+Install dependencies from the repository root:
 
 ```bash
-npm install -g agent-browser
-agent-browser install
+npm install
 ```
 
-The extension also works with `npx agent-browser`, but a global install is the simplest setup.
+If Playwright has not installed Chromium yet, run:
+
+```bash
+npx playwright install chromium
+```
 
 ## Usage
 
@@ -21,32 +26,33 @@ pi -e ./extensions/browser-use/index.ts
 
 The extension exposes a single `browser` tool and blocks all non-browser tools for the session.
 
-Start with a `goto` step:
+Start with a `goto` action:
 
 ```json
 {
-  "steps": [
+  "actions": [
     { "type": "goto", "url": "https://example.com" },
-    { "type": "snapshot", "interactive": true }
+    { "type": "snapshot" }
   ]
 }
 ```
 
-Use `snapshot` steps to collect refs like `@e1` when you need them, and batch short predictable flows into one call.
+Each result includes a fresh accessibility tree with refs like `e1`. Refs are regenerated after every call, so use only refs from the latest result.
 
 ## Tools
 
-The `browser` tool accepts a `steps` array. Supported step types are:
+The `browser` tool accepts an `actions` array with 1 to 7 actions:
 
-- navigation and session: `goto`, `navigation`, `tabs`, `close`
-- page interaction: `click`, `type`, `fill`, `select`, `check`, `uncheck`, `hover`, `drag`, `upload`, `scroll`, `wait`
-- inspection and capture: `snapshot`, `screenshot`, `pdf`
-- keyboard and mouse: `keyboard`, `mouse`
+- `goto`: navigate to a URL.
+- `snapshot`: observe only.
+- `click`: click a ref from the latest accessibility tree.
+- `fill`: replace text in an editable ref.
+- `press`: press a keyboard key, optionally after focusing a ref.
+- `scroll`: scroll the page or a scrollable ref.
+- `wait`: wait for milliseconds or a Playwright load state.
 
 ## Notes
 
-- `snapshot` supports `interactive`, `urls`, `compact`, `depth`, and `selector`.
-- `screenshot` supports `annotate` and `full`.
-- `select` accepts either a single `value` or multiple `values`.
-- `upload` targets a specific `ref` or selector and accepts `files`.
-- Shared options such as `session`, `sessionName`, `profile`, `provider`, `engine`, `cdp`, and `headers` live at the top level of the `browser` tool call and apply to every step in the sequence.
+- Observations come from CDP `Accessibility.getFullAXTree`, not Playwright AI snapshots.
+- Actions target refs, not CSS selectors, role/name locators, screenshots, or coordinates.
+- Set top-level `headed: true` on the first call to show the Chromium window.
