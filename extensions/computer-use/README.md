@@ -16,6 +16,7 @@ Single-file pi extension for native computer-use workflows plus a lightweight Ha
 - Forces computer-only mode by:
   - activating only the `computer` tool on session start
   - blocking non-`computer` tool calls at runtime
+- Keeps model context compact by collapsing older `computer` tool results; only the latest result keeps its screenshot in the model request.
 
 ## Required environment
 

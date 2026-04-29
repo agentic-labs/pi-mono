@@ -1,7 +1,9 @@
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import {
 	type ImageContent,
+	type Message,
 	type TextContent,
+	type ToolResultMessage,
 } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionContext, ToolCallEvent } from "@mariozechner/pi-coding-agent";
 
@@ -332,6 +334,34 @@ function actionSummary(action: ComputerAction): string {
 	}
 }
 
+function isComputerToolResult(message: Message): message is ToolResultMessage<ComputerToolDetails> {
+	return message.role === "toolResult" && message.toolName === COMPUTER_TOOL_NAME;
+}
+
+function latestComputerToolResultIndex(messages: Message[]): number {
+	for (let index = messages.length - 1; index >= 0; index--) {
+		if (isComputerToolResult(messages[index])) return index;
+	}
+	return -1;
+}
+
+function collapseComputerToolResult(message: ToolResultMessage<ComputerToolDetails>): ToolResultMessage<ComputerToolDetails> {
+	if (message.isError) return message;
+	const details = message.details;
+	const summary = [
+		"Previous computer result collapsed. The latest computer result contains the current screenshot.",
+		details?.actions.length ? `Actions: ${details.actions.map((action) => action.summary).join("; ")}` : undefined,
+		details?.screenshotPath ? `Screenshot path: ${details.screenshotPath}` : undefined,
+		details?.display
+			? `Display: ${details.display.width}x${details.display.height} ${details.display.displayEnv}`
+			: undefined,
+	].filter((line): line is string => typeof line === "string" && line.length > 0);
+	return {
+		...message,
+		content: [{ type: "text", text: summary.join("\n") }],
+	};
+}
+
 async function executeAction(
 	pi: ExtensionAPI,
 	state: DriverState,
@@ -610,6 +640,18 @@ export default function registerComputerUseExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_start", () => {
 		pi.setActiveTools([COMPUTER_TOOL_NAME]);
+	});
+
+	pi.on("context", async (event) => {
+		const messages = event.messages as Message[];
+		const latestComputerIndex = latestComputerToolResultIndex(messages);
+		if (latestComputerIndex === -1) return;
+		return {
+			messages: messages.map((message, index) => {
+				if (index === latestComputerIndex || !isComputerToolResult(message)) return message;
+				return collapseComputerToolResult(message);
+			}),
+		};
 	});
 
 	pi.on("tool_call", async (event) => {
