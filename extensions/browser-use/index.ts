@@ -21,6 +21,7 @@ const DEFAULT_BROWSER_GUIDELINES = [
 	"Use `goto` first, then use refs from the returned accessibility tree for `click`, `fill`, `press`, and `scroll` actions.",
 	"Every successful browser call returns a fresh accessibility tree after the full action batch completes.",
 	"Batch actions that use refs already present in the latest tree and are expected to stay stable, such as filling visible fields, pressing keys in a focused field, toggling checkboxes, scrolling, waiting, and saving.",
+	"Avoid excessive waiting. When waiting is warranted, batch a short wait after actions that need the UI to settle, such as goto, click, fill, press, scroll, save, or confirm.",
 	"Stop the batch and use the returned snapshot after actions that reveal or replace UI, such as opening menus, clicking New, adding rows, selecting autocomplete values, navigating, or opening dialogs.",
 	"If an action fails, use the returned error details and latest accessibility tree to recover.",
 	"Refs are regenerated after each browser call. Use exact refs from the latest browser result, such as `e3`.",
