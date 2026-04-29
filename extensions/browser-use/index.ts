@@ -1,5 +1,5 @@
 import { createRequire } from "node:module";
-import { type TextContent } from "@mariozechner/pi-ai";
+import { type Message, type TextContent, type ToolResultMessage } from "@mariozechner/pi-ai";
 import { Type, type Static } from "typebox";
 import {
 	DEFAULT_MAX_BYTES,
@@ -436,6 +436,33 @@ function actionSummary(action: BrowserAction): string {
 	throw new Error("Unsupported browser action.");
 }
 
+function isBrowserToolResult(message: Message): message is ToolResultMessage<BrowserToolDetails> {
+	return message.role === "toolResult" && message.toolName === BROWSER_TOOL_NAME;
+}
+
+function latestBrowserToolResultIndex(messages: Message[]): number {
+	for (let index = messages.length - 1; index >= 0; index--) {
+		if (isBrowserToolResult(messages[index])) return index;
+	}
+	return -1;
+}
+
+function collapseBrowserToolResult(message: ToolResultMessage<BrowserToolDetails>): ToolResultMessage<BrowserToolDetails> {
+	if (message.isError) return message;
+	const details = message.details;
+	const summary = [
+		"Previous browser result collapsed. The latest browser result contains the current accessibility tree.",
+		details?.actions.length ? `Actions: ${details.actions.map((action) => action.summary).join("; ")}` : undefined,
+		details?.url ? `URL: ${details.url}` : undefined,
+		details?.title ? `Title: ${details.title}` : undefined,
+		details?.refCount !== undefined ? `Refs in that old snapshot: ${details.refCount}` : undefined,
+	].filter((line): line is string => typeof line === "string" && line.length > 0);
+	return {
+		...message,
+		content: [{ type: "text", text: summary.join("\n") }],
+	};
+}
+
 async function executeAction(state: DriverState, page: Page, action: BrowserAction): Promise<void> {
 	switch (action.type) {
 		case "goto":
@@ -518,6 +545,18 @@ export default function registerBrowserUseExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_shutdown", async () => {
 		await closeDriver(state);
+	});
+
+	pi.on("context", async (event) => {
+		const messages = event.messages as Message[];
+		const latestBrowserIndex = latestBrowserToolResultIndex(messages);
+		if (latestBrowserIndex === -1) return;
+		return {
+			messages: messages.map((message, index) => {
+				if (index === latestBrowserIndex || !isBrowserToolResult(message)) return message;
+				return collapseBrowserToolResult(message);
+			}),
+		};
 	});
 
 	pi.on("tool_call", async (event) => {
