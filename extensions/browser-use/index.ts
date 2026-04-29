@@ -284,11 +284,16 @@ async function ensureDriver(state: DriverState, headed: boolean | undefined): Pr
 		return { page: state.page, cdp: state.cdp };
 	}
 	state.headed = headed ?? false;
-	state.browser = await chromium.launch({ headless: !state.headed });
-	state.context = await state.browser.newContext();
-	state.page = await state.context.newPage();
-	state.cdp = await state.context.newCDPSession(state.page);
-	return { page: state.page, cdp: state.cdp };
+	try {
+		state.browser = await chromium.launch({ headless: !state.headed });
+		state.context = await state.browser.newContext();
+		state.page = await state.context.newPage();
+		state.cdp = await state.context.newCDPSession(state.page);
+		return { page: state.page, cdp: state.cdp };
+	} catch (error) {
+		await closeDriver(state);
+		throw error;
+	}
 }
 
 async function closeDriver(state: DriverState): Promise<void> {
