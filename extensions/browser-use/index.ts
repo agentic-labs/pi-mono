@@ -23,10 +23,9 @@ const DEFAULT_BROWSER_GUIDELINES = [
 	"Batch actions that use refs already present in the latest tree and are expected to stay stable, such as filling visible fields, pressing keys in a focused field, toggling checkboxes, scrolling, waiting, and saving.",
 	"Stop the batch and use the returned snapshot after actions that reveal or replace UI, such as opening menus, clicking New, adding rows, selecting autocomplete values, navigating, or opening dialogs.",
 	"If an action fails, use the returned error details and latest accessibility tree to recover.",
-	"Refs are regenerated after each browser call. Use only refs from the latest browser result.",
+	"Refs are regenerated after each browser call. Use exact refs from the latest browser result, such as `e3`.",
 	"Do not predict screen coordinates or rely on screenshots. The browser tool is text-only.",
 ];
-const REF_PATTERN = /\[ref=([^\]\s]+)\]/g;
 
 const LoadStateSchema = Type.Union([Type.Literal("load"), Type.Literal("domcontentloaded"), Type.Literal("networkidle")]);
 const ScrollDirectionSchema = Type.Union([Type.Literal("up"), Type.Literal("down"), Type.Literal("left"), Type.Literal("right")]);
@@ -88,7 +87,6 @@ interface BrowserToolDetails {
 	actions: Array<{ type: BrowserAction["type"]; summary: string }>;
 	title: string;
 	url: string;
-	refCount: number;
 	error?: string;
 	failedActionIndex?: number;
 	failedActionSummary?: string;
@@ -148,19 +146,8 @@ function shouldBlockTool(event: ToolCallEvent): boolean {
 	return event.toolName !== BROWSER_TOOL_NAME;
 }
 
-function normalizeRef(ref: string): string {
-	let normalized = ref.trim();
-	if (normalized.startsWith("@")) normalized = normalized.slice(1);
-	const match = normalized.match(/^\[?ref=([^\]\s]+)\]?$/);
-	return match?.[1] ?? normalized;
-}
-
 function refLocator(page: Page, ref: string): Locator {
-	return page.locator(`aria-ref=${normalizeRef(ref)}`);
-}
-
-function countRefs(snapshot: string): number {
-	return Array.from(snapshot.matchAll(REF_PATTERN)).length;
+	return page.locator(`aria-ref=${ref}`);
 }
 
 function errorToString(error: unknown): string {
@@ -241,9 +228,9 @@ async function scrollPage(page: Page, direction: ScrollDirection | undefined, am
 	}, delta);
 }
 
-async function renderAccessibilityTree(page: Page): Promise<{ text: string; refCount: number }> {
+async function renderAccessibilityTree(page: Page): Promise<string> {
 	const snapshot = await page.ariaSnapshot({ mode: "ai" });
-	return { text: truncateSnapshot(snapshot || "(accessibility tree is empty)"), refCount: countRefs(snapshot) };
+	return truncateSnapshot(snapshot || "(accessibility tree is empty)");
 }
 
 async function buildBrowserToolResult(
@@ -260,8 +247,7 @@ async function buildBrowserToolResult(
 		summaries.map((entry, index) => `${index + 1}. ${entry.summary}`).join("\n"),
 		`URL: ${url}`,
 		`Title: ${title || "(untitled)"}`,
-		`Refs: ${snapshot.refCount}`,
-		`Accessibility tree:\n${snapshot.text}`,
+		`Accessibility tree:\n${snapshot}`,
 	].filter((section): section is string => typeof section === "string" && section.length > 0);
 	return {
 		content: [{ type: "text", text: sections.join("\n\n") }],
@@ -269,7 +255,6 @@ async function buildBrowserToolResult(
 			actions: summaries,
 			title,
 			url,
-			refCount: snapshot.refCount,
 			error: errorDetails?.error,
 			failedActionIndex: errorDetails?.failedActionIndex,
 			failedActionSummary: errorDetails?.failedActionSummary,
@@ -309,16 +294,25 @@ function latestBrowserToolResultIndex(messages: Message[]): number {
 	return -1;
 }
 
+function fallbackErrorText(message: ToolResultMessage<BrowserToolDetails>): string | undefined {
+	if (!message.isError) return undefined;
+	return message.content
+		.filter((content): content is TextContent => content.type === "text")
+		.map((content) => content.text.split("\n\nAccessibility tree:")[0]?.trim())
+		.find((text) => text && text.length > 0);
+}
+
 function collapseBrowserToolResult(message: ToolResultMessage<BrowserToolDetails>): ToolResultMessage<BrowserToolDetails> {
 	const details = message.details;
+	const error = details?.error ?? fallbackErrorText(message);
 	const summary = [
 		"Previous browser result collapsed. The latest browser result contains the current accessibility tree.",
-		details?.error ? `Error: ${details.error}` : undefined,
+		error ? `Error: ${error}` : undefined,
+		details?.failedActionIndex !== undefined ? `Failed action index: ${details.failedActionIndex}` : undefined,
 		details?.failedActionSummary ? `Failed action: ${details.failedActionSummary}` : undefined,
 		details?.actions.length ? `Actions: ${details.actions.map((action) => action.summary).join("; ")}` : undefined,
 		details?.url ? `URL: ${details.url}` : undefined,
 		details?.title ? `Title: ${details.title}` : undefined,
-		details?.refCount !== undefined ? `Refs in that old snapshot: ${details.refCount}` : undefined,
 	].filter((line): line is string => typeof line === "string" && line.length > 0);
 	return {
 		...message,
