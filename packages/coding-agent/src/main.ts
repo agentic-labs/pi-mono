@@ -352,6 +352,10 @@ function buildSessionOptions(
 		options.thinkingLevel = parsed.thinking;
 	}
 
+	if (parsed.maxTurns !== undefined) {
+		options.maxTurns = parsed.maxTurns;
+	}
+
 	// Scoped models for Ctrl+P cycling
 	// Keep thinking level undefined when not explicitly set in the model pattern.
 	// Undefined means "inherit current session thinking level" during cycling.
@@ -585,6 +589,7 @@ export async function main(args: string[], options?: MainOptions) {
 			model: sessionOptions.model,
 			thinkingLevel: sessionOptions.thinkingLevel,
 			scopedModels: sessionOptions.scopedModels,
+			maxTurns: sessionOptions.maxTurns,
 			tools: sessionOptions.tools,
 			noTools: sessionOptions.noTools,
 			customTools: sessionOptions.customTools,

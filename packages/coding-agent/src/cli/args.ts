@@ -25,6 +25,7 @@ export interface Args {
 	session?: string;
 	fork?: string;
 	sessionDir?: string;
+	maxTurns?: number;
 	models?: string[];
 	tools?: string[];
 	noTools?: boolean;
@@ -99,6 +100,15 @@ export function parseArgs(args: string[]): Args {
 			result.fork = args[++i];
 		} else if (arg === "--session-dir" && i + 1 < args.length) {
 			result.sessionDir = args[++i];
+		} else if (arg === "--max-turns") {
+			const value = args[++i];
+			const maxTurns = Number(value);
+			if (value === undefined || value.startsWith("-") || !Number.isInteger(maxTurns) || maxTurns <= 0) {
+				result.diagnostics.push({ type: "error", message: "--max-turns requires a positive integer" });
+				if (value?.startsWith("-")) i--;
+			} else {
+				result.maxTurns = maxTurns;
+			}
 		} else if (arg === "--models" && i + 1 < args.length) {
 			result.models = args[++i].split(",").map((s) => s.trim());
 		} else if (arg === "--no-tools" || arg === "-nt") {
@@ -221,6 +231,7 @@ ${chalk.bold("Options:")}
   --session <path|id>            Use specific session file or partial UUID
   --fork <path|id>               Fork specific session file or partial UUID into a new session
   --session-dir <dir>            Directory for session storage and lookup
+  --max-turns <n>                Maximum assistant turns per prompt
   --no-session                   Don't save session (ephemeral)
   --models <patterns>            Comma-separated model patterns for Ctrl+P cycling
                                  Supports globs (anthropic/*, *sonnet*) and fuzzy matching

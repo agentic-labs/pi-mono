@@ -161,6 +161,7 @@ async function runLoop(
 	streamFn?: StreamFn,
 ): Promise<void> {
 	let firstTurn = true;
+	let assistantTurns = 0;
 	// Check for steering messages at start (user may have typed while waiting)
 	let pendingMessages: AgentMessage[] = (await config.getSteeringMessages?.()) || [];
 
@@ -190,6 +191,7 @@ async function runLoop(
 			// Stream assistant response
 			const message = await streamAssistantResponse(currentContext, config, signal, emit, streamFn);
 			newMessages.push(message);
+			assistantTurns++;
 
 			if (message.stopReason === "error" || message.stopReason === "aborted") {
 				await emit({ type: "turn_end", message, toolResults: [] });
@@ -214,6 +216,10 @@ async function runLoop(
 			}
 
 			await emit({ type: "turn_end", message, toolResults });
+			if (config.maxTurns !== undefined && assistantTurns >= config.maxTurns) {
+				await emit({ type: "agent_end", messages: newMessages });
+				return;
+			}
 
 			pendingMessages = (await config.getSteeringMessages?.()) || [];
 		}

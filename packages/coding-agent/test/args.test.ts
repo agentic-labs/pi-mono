@@ -135,6 +135,16 @@ describe("parseArgs", () => {
 			const result = parseArgs(["--models", "gpt-4o,claude-sonnet,gemini-pro"]);
 			expect(result.models).toEqual(["gpt-4o", "claude-sonnet", "gemini-pro"]);
 		});
+
+		test("parses --max-turns", () => {
+			const result = parseArgs(["--max-turns", "3"]);
+			expect(result.maxTurns).toBe(3);
+		});
+
+		test("rejects invalid --max-turns", () => {
+			const result = parseArgs(["--max-turns", "0"]);
+			expect(result.diagnostics).toEqual([{ type: "error", message: "--max-turns requires a positive integer" }]);
+		});
 	});
 
 	describe("--no-session flag", () => {

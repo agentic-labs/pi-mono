@@ -47,6 +47,8 @@ export interface CreateAgentSessionOptions {
 	thinkingLevel?: ThinkingLevel;
 	/** Models available for cycling (Ctrl+P in interactive mode) */
 	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
+	/** Maximum number of assistant turns to run per prompt. */
+	maxTurns?: number;
 
 	/**
 	 * Optional default tool suppression mode when no explicit allowlist is provided.
@@ -366,6 +368,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		transport: settingsManager.getTransport(),
 		thinkingBudgets: settingsManager.getThinkingBudgets(),
 		maxRetryDelayMs: settingsManager.getProviderRetrySettings().maxRetryDelayMs,
+		maxTurns: options.maxTurns,
 	});
 
 	// Restore messages if session has existing data

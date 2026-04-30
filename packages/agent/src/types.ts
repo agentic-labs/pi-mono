@@ -102,6 +102,8 @@ export interface AfterToolCallContext {
 
 export interface AgentLoopConfig extends SimpleStreamOptions {
 	model: Model<any>;
+	/** Maximum number of assistant turns to run before stopping. */
+	maxTurns?: number;
 
 	/**
 	 * Converts AgentMessage[] to LLM-compatible Message[] before each LLM call.
