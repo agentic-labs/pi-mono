@@ -20,10 +20,13 @@ const DEFAULT_WAIT_SECONDS = 1;
 const DEFAULT_HOLD_KEY_DURATION_SECONDS = 0.5;
 const REQUIRED_BINARIES = ["bash", "scrot", "xdotool"] as const;
 const DEFAULT_COMPUTER_PROMPT_SNIPPET =
-	"`computer`: interact with an isolated Linux desktop by taking screenshots and performing mouse/keyboard actions. Use this instead of shell tools.";
+	"`computer`: interact with an isolated Linux desktop by taking screenshots and performing mouse/keyboard actions. Batch stable low-level actions, and include a screenshot when you need to observe the resulting UI.";
 const DEFAULT_COMPUTER_GUIDELINES = [
 	"Use only the computer tool for environment interaction. Do not attempt to use bash, read, edit, write, grep, find, or ls.",
-	"After actions that may change the UI state, request a screenshot so you can verify the result before continuing.",
+	"Batch actions that operate on the current visible UI and are expected to stay stable, such as typing into a focused field, keypress sequences, small mouse moves, clicks followed by short waits, scrolling, and taking a screenshot.",
+	"Avoid excessive waiting. When waiting is warranted, batch a short wait after actions that need the UI to settle, such as clicks, typing, keypresses, scrolling, saves, confirmations, or navigation.",
+	"After actions that may reveal, replace, or move UI, include a screenshot at the end of the batch so you can verify the result before continuing.",
+	"Stop the batch and inspect a new screenshot before using new coordinates or interacting with controls that were not visible in the previous screenshot.",
 ];
 
 type ComputerAction =

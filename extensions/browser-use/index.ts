@@ -28,7 +28,7 @@ const DEFAULT_BROWSER_GUIDELINES = [
 	"Do not predict screen coordinates or rely on screenshots. The browser tool is text-only.",
 ];
 
-const LoadStateSchema = Type.Union([Type.Literal("load"), Type.Literal("domcontentloaded"), Type.Literal("networkidle")]);
+const LoadStateSchema = Type.Union([Type.Literal("load"), Type.Literal("domcontentloaded")]);
 const ScrollDirectionSchema = Type.Union([Type.Literal("up"), Type.Literal("down"), Type.Literal("left"), Type.Literal("right")]);
 
 const browserToolParameters = Type.Object(
@@ -273,7 +273,7 @@ function actionSummary(action: BrowserAction): string {
 		case "click":
 			return `Clicked ${action.ref}`;
 		case "fill":
-			return `Filled ${action.ref} with ${action.text.length} characters`;
+			return `Filled ${action.ref} with ${typeof action.text === "string" ? action.text.length : 0} characters`;
 		case "press":
 			return action.ref ? `Focused ${action.ref} and pressed ${action.key}` : `Pressed ${action.key}`;
 		case "scroll":
@@ -297,21 +297,23 @@ function latestBrowserToolResultIndex(messages: Message[]): number {
 
 function fallbackErrorText(message: ToolResultMessage<BrowserToolDetails>): string | undefined {
 	if (!message.isError) return undefined;
-	return message.content
-		.filter((content): content is TextContent => content.type === "text")
+	const content = Array.isArray(message.content) ? message.content : [];
+	return content
+		.filter((content): content is TextContent => content.type === "text" && typeof content.text === "string")
 		.map((content) => content.text.split("\n\nAccessibility tree:")[0]?.trim())
 		.find((text) => text && text.length > 0);
 }
 
 function collapseBrowserToolResult(message: ToolResultMessage<BrowserToolDetails>): ToolResultMessage<BrowserToolDetails> {
 	const details = message.details;
+	const actions = Array.isArray(details?.actions) ? details.actions : [];
 	const error = details?.error ?? fallbackErrorText(message);
 	const summary = [
 		"Previous browser result collapsed. The latest browser result contains the current accessibility tree.",
 		error ? `Error: ${error}` : undefined,
 		details?.failedActionIndex !== undefined ? `Failed action index: ${details.failedActionIndex}` : undefined,
 		details?.failedActionSummary ? `Failed action: ${details.failedActionSummary}` : undefined,
-		details?.actions.length ? `Actions: ${details.actions.map((action) => action.summary).join("; ")}` : undefined,
+		actions.length ? `Actions: ${actions.map((action) => action.summary).join("; ")}` : undefined,
 		details?.url ? `URL: ${details.url}` : undefined,
 		details?.title ? `Title: ${details.title}` : undefined,
 	].filter((line): line is string => typeof line === "string" && line.length > 0);
@@ -403,7 +405,7 @@ export default function registerBrowserUseExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("context", async (event) => {
-		const messages = event.messages as Message[];
+		const messages = Array.isArray(event.messages) ? (event.messages as Message[]) : [];
 		const latestBrowserIndex = latestBrowserToolResultIndex(messages);
 		if (latestBrowserIndex === -1) return;
 		return {
