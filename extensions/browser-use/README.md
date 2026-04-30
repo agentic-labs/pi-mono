@@ -55,4 +55,3 @@ The `browser` tool accepts an `actions` array with 1 to 7 actions:
 
 - Observations come from CDP `Accessibility.getFullAXTree`, not Playwright AI snapshots.
 - Actions target refs, not CSS selectors, role/name locators, screenshots, or coordinates.
-- Set top-level `headed: true` on the first call to show the Chromium window.

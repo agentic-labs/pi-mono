@@ -13,17 +13,27 @@ import { Type, type Static } from "typebox";
 const EXTENSION_NAME = "browser-use";
 const BROWSER_TOOL_NAME = "browser";
 const DEFAULT_WAIT_MS = 1000;
+const DEFAULT_ACTION_TIMEOUT_MS = 3000;
+const DEFAULT_NAVIGATION_TIMEOUT_MS = 10000;
+const WAIT_CAP_MS = 3000;
+const CLICK_PAGE_CHANGE_CHECK_MS = 250;
 const DEFAULT_SCROLL_Y = 600;
 const DEFAULT_BROWSER_PROMPT_SNIPPET =
 	"`browser`: interact with a Chromium browser using Playwright AI accessibility-tree refs. Batch stable actions; every successful call returns the latest accessibility tree after all requested actions.";
 const DEFAULT_BROWSER_GUIDELINES = [
 	"Use only the `browser` tool for browser interaction. Do not attempt to use bash, read, edit, write, grep, find, or ls.",
 	"Use `goto` first, then use refs from the returned accessibility tree for `click`, `fill`, `press`, and `scroll` actions.",
+	"Never use a ref after `goto` in the same browser call. Call `goto` alone, then use refs from the returned tree.",
+	"At most 7 actions per browser call.",
 	"Every successful browser call returns a fresh accessibility tree after the full action batch completes.",
 	"Batch actions that use refs already present in the latest tree and are expected to stay stable, such as filling visible fields, pressing keys in a focused field, toggling checkboxes, scrolling, waiting, and saving.",
+	"After UI changes, stop the batch and use the returned snapshot before the next structural action.",
 	"Avoid excessive waiting. When waiting is warranted, batch a short wait after actions that need the UI to settle, such as goto, click, fill, press, scroll, save, or confirm.",
 	"Stop the batch and use the returned snapshot after actions that reveal or replace UI, such as opening menus, clicking New, adding rows, selecting autocomplete values, navigating, or opening dialogs.",
+	"If a click returns an error but the URL/title changed, treat the navigation as success and continue from the returned tree.",
 	"If an action fails, use the returned error details and latest accessibility tree to recover.",
+	"For autocomplete fields, fill text, then use ArrowDown/Enter. Do not repeatedly click an option that is already selected.",
+	"Do not retry the same failed ref. Re-read the returned tree and choose a current ref.",
 	"Refs are regenerated after each browser call. Use exact refs from the latest browser result, such as `e3`.",
 	"Do not predict screen coordinates or rely on screenshots. The browser tool is text-only.",
 ];
@@ -33,7 +43,6 @@ const ScrollDirectionSchema = Type.Union([Type.Literal("up"), Type.Literal("down
 
 const browserToolParameters = Type.Object(
 	{
-		headed: Type.Optional(Type.Boolean({ description: "Whether to show the Chromium window." })),
 		actions: Type.Array(
 			Type.Union([
 				Type.Object({ type: Type.Literal("goto"), url: Type.String({ description: "URL to navigate to." }) }, { additionalProperties: false }),
@@ -111,25 +120,29 @@ interface Browser {
 interface BrowserContext {
 	newPage(): Promise<Page>;
 	close(): Promise<void>;
+	setDefaultTimeout(timeout: number): void;
+	setDefaultNavigationTimeout(timeout: number): void;
 }
 
 interface Page {
 	ariaSnapshot(options: { mode: "ai" }): Promise<string>;
-	goto(url: string, options?: { waitUntil?: LoadState }): Promise<unknown>;
+	goto(url: string, options?: { timeout?: number; waitUntil?: LoadState }): Promise<unknown>;
 	title(): Promise<string>;
 	url(): string;
-	waitForLoadState(state: LoadState): Promise<void>;
+	waitForLoadState(state: LoadState, options?: { timeout?: number }): Promise<void>;
 	waitForTimeout(ms: number): Promise<void>;
 	evaluate<TArg>(pageFunction: (arg: TArg) => unknown, arg: TArg): Promise<unknown>;
 	locator(selector: string): Locator;
 	keyboard: { press(key: string): Promise<void> };
+	setDefaultTimeout(timeout: number): void;
+	setDefaultNavigationTimeout(timeout: number): void;
 }
 
 interface Locator {
-	click(): Promise<void>;
-	fill(text: string): Promise<void>;
-	focus(): Promise<void>;
-	evaluate<TArg>(pageFunction: (element: Element, arg: TArg) => unknown, arg: TArg): Promise<unknown>;
+	click(options?: { timeout?: number }): Promise<void>;
+	fill(text: string, options?: { timeout?: number }): Promise<void>;
+	focus(options?: { timeout?: number }): Promise<void>;
+	evaluate<TArg>(pageFunction: (element: Element, arg: TArg) => unknown, arg: TArg, options?: { timeout?: number }): Promise<unknown>;
 }
 
 interface DriverState {
@@ -137,7 +150,6 @@ interface DriverState {
 	browser?: Browser;
 	context?: BrowserContext;
 	page?: Page;
-	headed?: boolean;
 }
 
 const require = createRequire(import.meta.url);
@@ -165,15 +177,15 @@ function truncateSnapshot(text: string): string {
 	return content;
 }
 
-async function ensureDriver(state: DriverState, headed: boolean | undefined): Promise<Page> {
-	if (state.page) {
-		if (headed !== undefined && headed !== state.headed) throw new Error("Browser is already running; `headed` can only be set on the first browser call.");
-		return state.page;
-	}
-	state.headed = headed ?? false;
-	state.browser = await chromium.launch({ headless: !state.headed });
+async function ensureDriver(state: DriverState): Promise<Page> {
+	if (state.page) return state.page;
+	state.browser = await chromium.launch({ headless: true });
 	state.context = await state.browser.newContext();
 	state.page = await state.context.newPage();
+	state.context.setDefaultTimeout(DEFAULT_ACTION_TIMEOUT_MS);
+	state.context.setDefaultNavigationTimeout(DEFAULT_NAVIGATION_TIMEOUT_MS);
+	state.page.setDefaultTimeout(DEFAULT_ACTION_TIMEOUT_MS);
+	state.page.setDefaultNavigationTimeout(DEFAULT_NAVIGATION_TIMEOUT_MS);
 	return state.page;
 }
 
@@ -186,16 +198,46 @@ async function closeDriver(state: DriverState): Promise<void> {
 	await browser?.close().catch(() => undefined);
 }
 
-async function clickRef(page: Page, ref: string): Promise<void> {
-	await refLocator(page, ref).click();
+async function clickRef(page: Page, ref: string): Promise<string | undefined> {
+	const beforeUrl = page.url();
+	const beforeTitle = await page.title();
+
+	try {
+		await refLocator(page, ref).click({ timeout: DEFAULT_ACTION_TIMEOUT_MS });
+		return undefined;
+	} catch (error) {
+		await page.waitForTimeout(CLICK_PAGE_CHANGE_CHECK_MS);
+		const afterUrl = page.url();
+		const afterTitle = await page.title();
+
+		if (afterUrl !== beforeUrl || afterTitle !== beforeTitle) {
+			return `Click ${ref} reported ${errorToString(error)}, but the page changed to ${afterUrl}; treating it as successful.`;
+		}
+
+		throw error;
+	}
 }
 
 async function fillRef(page: Page, ref: string, text: string): Promise<void> {
-	await refLocator(page, ref).fill(text);
+	await refLocator(page, ref).fill(text, { timeout: DEFAULT_ACTION_TIMEOUT_MS });
 }
 
 async function focusRef(page: Page, ref: string): Promise<void> {
-	await refLocator(page, ref).focus();
+	await refLocator(page, ref).focus({ timeout: DEFAULT_ACTION_TIMEOUT_MS });
+}
+
+function waitDurationMs(action: Extract<BrowserAction, { type: "wait" }>): number {
+	return Math.min(action.ms ?? DEFAULT_WAIT_MS, WAIT_CAP_MS);
+}
+
+function validateActionBatch(actions: BrowserAction[]): void {
+	let sawGoto = false;
+	for (const action of actions) {
+		if (sawGoto && "ref" in action) {
+			throw new Error("Refs are invalid after `goto` in the same browser call. Use `goto`, read the returned snapshot, then use refs from that snapshot.");
+		}
+		if (action.type === "goto") sawGoto = true;
+	}
 }
 
 function scrollDelta(direction: ScrollDirection | undefined, amount: number | undefined): { x: number; y: number } {
@@ -218,7 +260,7 @@ async function scrollRef(page: Page, ref: string, direction: ScrollDirection | u
 	await refLocator(page, ref).evaluate((element, value) => {
 		element.scrollIntoView({ block: "center", inline: "center" });
 		element.scrollBy(value.x, value.y);
-	}, delta);
+	}, delta, { timeout: DEFAULT_ACTION_TIMEOUT_MS });
 }
 
 async function scrollPage(page: Page, direction: ScrollDirection | undefined, amount: number | undefined): Promise<void> {
@@ -279,7 +321,7 @@ function actionSummary(action: BrowserAction): string {
 		case "scroll":
 			return action.ref ? `Scrolled ${action.ref}` : "Scrolled page";
 		case "wait":
-			return action.loadState ? `Waited for ${action.loadState}` : `Waited ${action.ms ?? DEFAULT_WAIT_MS}ms`;
+			return action.loadState ? `Waited for ${action.loadState}` : `Waited ${waitDurationMs(action)}ms`;
 	}
 	throw new Error("Unsupported browser action.");
 }
@@ -323,16 +365,15 @@ function collapseBrowserToolResult(message: ToolResultMessage<BrowserToolDetails
 	};
 }
 
-async function executeAction(page: Page, action: BrowserAction): Promise<void> {
+async function executeAction(page: Page, action: BrowserAction): Promise<string | undefined> {
 	switch (action.type) {
 		case "goto":
-			await page.goto(action.url, { waitUntil: "domcontentloaded" });
+			await page.goto(action.url, { timeout: DEFAULT_NAVIGATION_TIMEOUT_MS, waitUntil: "domcontentloaded" });
 			break;
 		case "snapshot":
 			break;
 		case "click":
-			await clickRef(page, action.ref);
-			break;
+			return clickRef(page, action.ref);
 		case "fill":
 			await fillRef(page, action.ref, action.text);
 			break;
@@ -346,8 +387,8 @@ async function executeAction(page: Page, action: BrowserAction): Promise<void> {
 			break;
 		case "wait":
 			if (action.ms !== undefined && action.loadState !== undefined) throw new Error("browser wait accepts either `ms` or `loadState`, not both.");
-			if (action.loadState) await page.waitForLoadState(action.loadState);
-			else await page.waitForTimeout(action.ms ?? DEFAULT_WAIT_MS);
+			if (action.loadState) await page.waitForLoadState(action.loadState, { timeout: WAIT_CAP_MS });
+			else await page.waitForTimeout(waitDurationMs(action));
 			break;
 	}
 }
@@ -360,13 +401,14 @@ async function runBrowserTool(
 	if (state.activeToolCallId && state.activeToolCallId !== toolCallId) throw new Error("Browser tool does not allow parallel execution.");
 	state.activeToolCallId = toolCallId;
 	try {
-		const page = await ensureDriver(state, params.headed);
+		validateActionBatch(params.actions);
+		const page = await ensureDriver(state);
 		const summaries: Array<{ type: BrowserAction["type"]; summary: string }> = [];
 		for (const [index, action] of params.actions.entries()) {
 			const summary = actionSummary(action);
 			try {
-				await executeAction(page, action);
-				summaries.push({ type: action.type, summary });
+				const warning = await executeAction(page, action);
+				summaries.push({ type: action.type, summary: warning ? `${summary}\nWarning: ${warning}` : summary });
 			} catch (error) {
 				return buildBrowserToolResult(page, summaries, {
 					error: errorToString(error),
