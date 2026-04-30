@@ -9,6 +9,7 @@
 
 ### Fixed
 
+- Fixed `pi --mode json` to emit extension hook failures as JSONL `extension_error` records instead of plain stderr text that can corrupt combined transcript logs.
 - Fixed `pi update` to skip self-update reinstalls when the installed version is already current ([#3853](https://github.com/badlogic/pi-mono/issues/3853)).
 - Fixed Cloudflare Workers AI attribution headers to honor the install telemetry setting.
 - Fixed `pi update --self` detection and execution for Windows package-manager shim installs, including symlinked global package roots, and print the manual fallback command when self-update fails. ([#3857](https://github.com/badlogic/pi-mono/issues/3857))

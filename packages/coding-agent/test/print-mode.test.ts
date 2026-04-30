@@ -1,5 +1,6 @@
 import type { AssistantMessage, ImageContent, ToolResultMessage, UserMessage } from "@mariozechner/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ExtensionError } from "../src/core/extensions/index.js";
 import type { AgentSessionEvent, AgentSessionEventListener, SessionShutdownEvent } from "../src/index.js";
 import { runPrintMode } from "../src/modes/print-mode.js";
 
@@ -8,6 +9,10 @@ type EmitEvent = SessionShutdownEvent;
 type FakeExtensionRunner = {
 	hasHandlers: (eventType: string) => boolean;
 	emit: ReturnType<typeof vi.fn<(event: EmitEvent) => Promise<void>>>;
+};
+
+type FakeBindExtensionsOptions = {
+	onError: (error: ExtensionError) => void;
 };
 
 type FakeSession = {
@@ -89,7 +94,11 @@ function captureStdout(): string[] {
 	return chunks;
 }
 
-function createRuntimeHost(assistantMessage: AssistantMessage, events: AgentSessionEvent[] = []): FakeRuntimeHost {
+function createRuntimeHost(
+	assistantMessage: AssistantMessage,
+	events: AgentSessionEvent[] = [],
+	extensionErrors: ExtensionError[] = [],
+): FakeRuntimeHost {
 	const extensionRunner: FakeExtensionRunner = {
 		hasHandlers: (eventType: string) => eventType === "session_shutdown",
 		emit: vi.fn(async () => {}),
@@ -103,7 +112,11 @@ function createRuntimeHost(assistantMessage: AssistantMessage, events: AgentSess
 		agent: { waitForIdle: async () => {} },
 		state,
 		extensionRunner,
-		bindExtensions: vi.fn(async () => {}),
+		bindExtensions: vi.fn(async (options: FakeBindExtensionsOptions) => {
+			for (const error of extensionErrors) {
+				options.onError(error);
+			}
+		}),
 		subscribe: vi.fn((eventListener) => {
 			listener = eventListener;
 			return () => {
@@ -207,6 +220,33 @@ describe("runPrintMode", () => {
 			toolResultMessage,
 			{ type: "agent_end" },
 		]);
+	});
+
+	it("outputs extension errors as json records in json mode", async () => {
+		const extensionError: ExtensionError = {
+			extensionPath: "/tmp/pi-mono/extensions/browser-use/index.ts",
+			event: "context",
+			error: "Cannot read properties of undefined (reading 'length')",
+		};
+		const runtimeHost = createRuntimeHost(createAssistantMessage({ text: "done" }), [], [extensionError]);
+		const stdout = captureStdout();
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		const exitCode = await runPrintMode(runtimeHost as unknown as Parameters<typeof runPrintMode>[0], {
+			mode: "json",
+		});
+
+		const lines = stdout.join("").split("\n").filter(Boolean);
+		expect(exitCode).toBe(0);
+		expect(lines.map((line) => JSON.parse(line))).toEqual([
+			{
+				type: "extension_error",
+				extensionPath: extensionError.extensionPath,
+				event: extensionError.event,
+				error: extensionError.error,
+			},
+		]);
+		expect(errorSpy).not.toHaveBeenCalled();
 	});
 
 	it("emits session_shutdown and returns non-zero on assistant error", async () => {

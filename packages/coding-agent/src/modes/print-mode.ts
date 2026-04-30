@@ -9,6 +9,7 @@
 import type { AssistantMessage, ImageContent } from "@mariozechner/pi-ai";
 import type { AgentSessionEvent } from "../core/agent-session.js";
 import type { AgentSessionRuntime } from "../core/agent-session-runtime.js";
+import type { ExtensionError } from "../core/extensions/index.js";
 import { flushRawStdout, writeRawStdout } from "../core/output-guard.js";
 import { killTrackedDetachedChildren } from "../utils/shell.js";
 import { serializeJsonLine } from "./rpc/jsonl.js";
@@ -38,6 +39,17 @@ function writeJsonTranscriptRecord(event: AgentSessionEvent): void {
 	} else if (event.type === "agent_end") {
 		writeRawStdout(serializeJsonLine({ type: "agent_end" }));
 	}
+}
+
+function writeJsonExtensionError(error: ExtensionError): void {
+	writeRawStdout(
+		serializeJsonLine({
+			type: "extension_error",
+			extensionPath: error.extensionPath,
+			event: error.event,
+			error: error.error,
+		}),
+	);
 }
 
 /**
@@ -110,7 +122,8 @@ export async function runPrintMode(runtimeHost: AgentSessionRuntime, options: Pr
 				},
 			},
 			onError: (err) => {
-				console.error(`Extension error (${err.extensionPath}): ${err.error}`);
+				if (mode === "json") writeJsonExtensionError(err);
+				else console.error(`Extension error (${err.extensionPath}): ${err.error}`);
 			},
 		});
 

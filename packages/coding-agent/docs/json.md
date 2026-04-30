@@ -12,6 +12,7 @@ Outputs a compact transcript as JSON lines. Streaming deltas, tool execution eve
 - Complete `UserMessage` objects when user messages are accepted.
 - Complete `AssistantMessage` objects when assistant messages finish.
 - Complete `ToolResultMessage` objects when tool results are available.
+- `{"type":"extension_error","extensionPath":"...","event":"...","error":"..."}` when an extension hook fails.
 - `{"type":"agent_end"}` when a run ends.
 
 ## Output Format
@@ -23,6 +24,7 @@ Each line is one transcript record:
 {"role":"user","content":"Hello","timestamp":...}
 {"role":"assistant","content":[{"type":"text","text":"Hello"}],"provider":"openai","model":"gpt-4o-mini","stopReason":"stop",...}
 {"role":"toolResult","toolCallId":"call_123","toolName":"read","content":[{"type":"text","text":"..."}],"isError":false,"timestamp":...}
+{"type":"extension_error","extensionPath":"./extension.ts","event":"context","error":"Example error"}
 {"type":"agent_end"}
 ```
 
