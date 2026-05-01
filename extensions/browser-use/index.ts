@@ -330,6 +330,128 @@ function isBrowserToolResult(message: Message): message is ToolResultMessage<Bro
 	return message.role === "toolResult" && message.toolName === BROWSER_TOOL_NAME;
 }
 
+interface AnthropicCacheControl {
+	type: "ephemeral";
+	ttl?: string;
+}
+
+interface AnthropicContentBlock {
+	type: string;
+	cache_control?: AnthropicCacheControl;
+	id?: string;
+	name?: string;
+	tool_use_id?: string;
+	content?: unknown;
+}
+
+interface AnthropicMessage {
+	role: "user" | "assistant";
+	content: string | AnthropicContentBlock[];
+}
+
+interface AnthropicMessagesPayload {
+	messages?: AnthropicMessage[];
+	cache_control?: AnthropicCacheControl;
+	system?: unknown;
+	tools?: unknown;
+}
+
+const CACHEABLE_BLOCK_TYPES: ReadonlySet<string> = new Set(["text", "image", "tool_use", "tool_result"]);
+
+function isAnthropicMessagesPayload(payload: unknown): payload is AnthropicMessagesPayload {
+	if (!payload || typeof payload !== "object") return false;
+	const messages = (payload as { messages?: unknown }).messages;
+	if (!Array.isArray(messages) || messages.length === 0) return false;
+	return messages.every(
+		(message) =>
+			!!message &&
+			typeof message === "object" &&
+			typeof (message as { role?: unknown }).role === "string",
+	);
+}
+
+function collectBrowserToolUseIds(messages: AnthropicMessage[]): Set<string> {
+	const ids = new Set<string>();
+	for (const message of messages) {
+		if (message.role !== "assistant" || !Array.isArray(message.content)) continue;
+		for (const block of message.content) {
+			if (block.type === "tool_use" && block.name === BROWSER_TOOL_NAME && typeof block.id === "string") {
+				ids.add(block.id);
+			}
+		}
+	}
+	return ids;
+}
+
+function findLatestBrowserToolResult(
+	messages: AnthropicMessage[],
+): { messageIdx: number; blockIdx: number } | undefined {
+	const browserIds = collectBrowserToolUseIds(messages);
+	if (browserIds.size === 0) return undefined;
+	for (let messageIdx = messages.length - 1; messageIdx >= 0; messageIdx--) {
+		const message = messages[messageIdx];
+		if (!Array.isArray(message.content)) continue;
+		for (let blockIdx = message.content.length - 1; blockIdx >= 0; blockIdx--) {
+			const block = message.content[blockIdx];
+			if (block.type === "tool_result" && typeof block.tool_use_id === "string" && browserIds.has(block.tool_use_id)) {
+				return { messageIdx, blockIdx };
+			}
+		}
+	}
+	return undefined;
+}
+
+function findPrecedingCacheableBlock(
+	messages: AnthropicMessage[],
+	startMessageIdx: number,
+	startBlockIdx: number,
+): { messageIdx: number; blockIdx: number } | undefined {
+	let messageIdx = startMessageIdx;
+	let blockIdx = startBlockIdx - 1;
+	while (messageIdx >= 0) {
+		const message = messages[messageIdx];
+		if (Array.isArray(message.content)) {
+			while (blockIdx >= 0) {
+				if (CACHEABLE_BLOCK_TYPES.has(message.content[blockIdx].type)) {
+					return { messageIdx, blockIdx };
+				}
+				blockIdx--;
+			}
+		}
+		messageIdx--;
+		if (messageIdx >= 0) {
+			const previous = messages[messageIdx];
+			blockIdx = Array.isArray(previous.content) ? previous.content.length - 1 : -1;
+		}
+	}
+	return undefined;
+}
+
+function adjustAnthropicCachePlacement(payload: AnthropicMessagesPayload): AnthropicMessagesPayload | undefined {
+	const messages = payload.messages;
+	if (!messages || messages.length === 0) return undefined;
+	const target = findLatestBrowserToolResult(messages);
+	if (!target) return undefined;
+	const preceding = findPrecedingCacheableBlock(messages, target.messageIdx, target.blockIdx);
+	if (!preceding) return undefined;
+	const targetMessage = messages[preceding.messageIdx];
+	const targetBlocks = targetMessage.content as AnthropicContentBlock[];
+	const targetBlock = targetBlocks[preceding.blockIdx];
+	const cacheControl: AnthropicCacheControl = payload.cache_control ?? { type: "ephemeral" };
+	const result: AnthropicMessagesPayload = { ...payload };
+	delete result.cache_control;
+	if (targetBlock.cache_control) {
+		return result;
+	}
+	const newContent = targetBlocks.map((block, idx) =>
+		idx === preceding.blockIdx ? { ...block, cache_control: cacheControl } : block,
+	);
+	result.messages = messages.map((message, idx) =>
+		idx === preceding.messageIdx ? { ...message, content: newContent } : message,
+	);
+	return result;
+}
+
 function latestBrowserToolResultIndex(messages: Message[]): number {
 	for (let index = messages.length - 1; index >= 0; index--) {
 		if (isBrowserToolResult(messages[index])) return index;
@@ -456,6 +578,11 @@ export default function registerBrowserUseExtension(pi: ExtensionAPI): void {
 				return collapseBrowserToolResult(message);
 			}),
 		};
+	});
+
+	pi.on("before_provider_request", async (event) => {
+		if (!isAnthropicMessagesPayload(event.payload)) return undefined;
+		return adjustAnthropicCachePlacement(event.payload);
 	});
 
 	pi.on("tool_call", async (event) => {
