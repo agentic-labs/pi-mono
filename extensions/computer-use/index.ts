@@ -101,6 +101,10 @@ function getDriverConfig(): DriverConfig {
 	};
 }
 
+function displayCoordinateText(config: DriverConfig): string {
+	return `The display is ${config.displayWidth}x${config.displayHeight} ${config.displayEnv}; mouse coordinates are pixels from the top-left origin (0,0).`;
+}
+
 function getComputerToolParameters() {
 	return Type.Object({
 		actions: Type.Array(
@@ -711,7 +715,12 @@ async function runComputerTool(
 			summaries.push({ type: "screenshot", summary: actionSummary({ type: "screenshot" }) });
 		}
 		const content: (TextContent | ImageContent)[] = [
-			{ type: "text", text: summaries.map((entry, index) => `${index + 1}. ${entry.summary}`).join("\n") },
+			{
+				type: "text",
+				text: [displayCoordinateText(state.config), summaries.map((entry, index) => `${index + 1}. ${entry.summary}`).join("\n")].join(
+					"\n\n",
+				),
+			},
 		];
 		if (latestScreenshot) {
 			content.push(latestScreenshot.image);
@@ -750,8 +759,8 @@ export default function registerComputerUseExtension(pi: ExtensionAPI): void {
 		name: COMPUTER_TOOL_NAME,
 		label: "Computer",
 		description: "Interact with an isolated Linux desktop by taking screenshots and executing mouse/keyboard actions.",
-		promptSnippet: DEFAULT_COMPUTER_PROMPT_SNIPPET,
-		promptGuidelines: DEFAULT_COMPUTER_GUIDELINES,
+		promptSnippet: `${DEFAULT_COMPUTER_PROMPT_SNIPPET} ${displayCoordinateText(state.config)}`,
+		promptGuidelines: [...DEFAULT_COMPUTER_GUIDELINES, displayCoordinateText(state.config)],
 		parameters: getComputerToolParameters(),
 		async execute(toolCallId, params, _signal, _onUpdate, ctx) {
 			return runComputerTool(pi, state, ctx, toolCallId, params);
