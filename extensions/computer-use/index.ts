@@ -25,7 +25,7 @@ const DEFAULT_COMPUTER_GUIDELINES = [
 	"Use only the computer tool for environment interaction. Do not attempt to use bash, read, edit, write, grep, find, or ls.",
 	"Batch actions that operate on the current visible UI and are expected to stay stable, such as typing into a focused field, keypress sequences, small mouse moves, clicks followed by short waits, scrolling, and taking a screenshot.",
 	"Avoid excessive waiting. When waiting is warranted, batch a short wait after actions that need the UI to settle, such as clicks, typing, keypresses, scrolling, saves, confirmations, or navigation.",
-	"After actions that may reveal, replace, or move UI, include a screenshot at the end of the batch so you can verify the result before continuing.",
+	"Every successful computer call returns a final screenshot automatically.",
 	"Stop the batch and inspect a new screenshot before using new coordinates or interacting with controls that were not visible in the previous screenshot.",
 ];
 
@@ -592,6 +592,11 @@ async function runComputerTool(
 			const screenshot = await executeAction(pi, state, ctx, toolCallId, action);
 			summaries.push({ type: action.type, summary: actionSummary(action) });
 			if (screenshot) latestScreenshot = screenshot;
+		}
+		const lastAction = params.actions[params.actions.length - 1];
+		if (lastAction?.type !== "screenshot") {
+			latestScreenshot = await captureScreenshot(pi, state, ctx, toolCallId);
+			summaries.push({ type: "screenshot", summary: actionSummary({ type: "screenshot" }) });
 		}
 		const content: (TextContent | ImageContent)[] = [
 			{ type: "text", text: summaries.map((entry, index) => `${index + 1}. ${entry.summary}`).join("\n") },

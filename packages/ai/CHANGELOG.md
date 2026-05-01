@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- Switched Anthropic Messages conversation prompt caching to top-level automatic cache control so long tool sessions reuse growing history more effectively.
 - Removed generated Cloudflare Workers AI `User-Agent` model headers so attribution can be controlled by callers.
 
 ## [0.70.5] - 2026-04-27

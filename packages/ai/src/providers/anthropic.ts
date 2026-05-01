@@ -231,6 +231,10 @@ interface ServerSentEvent {
 	raw: string[];
 }
 
+type MessageCreateParamsStreamingWithCacheControl = MessageCreateParamsStreaming & {
+	cache_control?: CacheControlEphemeral;
+};
+
 interface SseDecoderState {
 	event: string | null;
 	data: string[];
@@ -847,11 +851,12 @@ function buildParams(
 	options?: AnthropicOptions,
 ): MessageCreateParamsStreaming {
 	const { cacheControl } = getCacheControl(model, options?.cacheRetention);
-	const params: MessageCreateParamsStreaming = {
+	const params: MessageCreateParamsStreamingWithCacheControl = {
 		model: model.id,
-		messages: convertMessages(context.messages, model, isOAuthToken, cacheControl),
+		messages: convertMessages(context.messages, model, isOAuthToken),
 		max_tokens: options?.maxTokens || (model.maxTokens / 3) | 0,
 		stream: true,
+		...(cacheControl ? { cache_control: cacheControl } : {}),
 	};
 
 	// For OAuth tokens, we MUST include Claude Code identity
@@ -954,7 +959,6 @@ function convertMessages(
 	messages: Message[],
 	model: Model<"anthropic-messages">,
 	isOAuthToken: boolean,
-	cacheControl?: CacheControlEphemeral,
 ): MessageParam[] {
 	const params: MessageParam[] = [];
 
@@ -1084,30 +1088,6 @@ function convertMessages(
 				role: "user",
 				content: toolResults,
 			});
-		}
-	}
-
-	// Add cache_control to the last user message to cache conversation history
-	if (cacheControl && params.length > 0) {
-		const lastMessage = params[params.length - 1];
-		if (lastMessage.role === "user") {
-			if (Array.isArray(lastMessage.content)) {
-				const lastBlock = lastMessage.content[lastMessage.content.length - 1];
-				if (
-					lastBlock &&
-					(lastBlock.type === "text" || lastBlock.type === "image" || lastBlock.type === "tool_result")
-				) {
-					(lastBlock as any).cache_control = cacheControl;
-				}
-			} else if (typeof lastMessage.content === "string") {
-				lastMessage.content = [
-					{
-						type: "text",
-						text: lastMessage.content,
-						cache_control: cacheControl,
-					},
-				] as any;
-			}
 		}
 	}
 

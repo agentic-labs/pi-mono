@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getModel } from "../src/models.js";
+import { streamAnthropic } from "../src/providers/anthropic.js";
 import { stream } from "../src/stream.js";
 import type { Context, Model } from "../src/types.js";
 
@@ -42,7 +43,8 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 				}
 
 				expect(capturedPayload).not.toBeNull();
-				// System prompt should have cache_control without ttl
+				// Top-level automatic caching should use the default TTL.
+				expect(capturedPayload.cache_control).toEqual({ type: "ephemeral" });
 				expect(capturedPayload.system).toBeDefined();
 				expect(capturedPayload.system[0].cache_control).toEqual({ type: "ephemeral" });
 			},
@@ -65,7 +67,8 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 			}
 
 			expect(capturedPayload).not.toBeNull();
-			// System prompt should have cache_control with ttl: "1h"
+			// Top-level automatic caching should use the long TTL.
+			expect(capturedPayload.cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
 			expect(capturedPayload.system).toBeDefined();
 			expect(capturedPayload.system[0].cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
 		});
@@ -81,14 +84,6 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 			};
 
 			let capturedPayload: any = null;
-
-			// We can't actually make the request (no proxy), but we can verify the payload
-			// by using a mock or checking the logic directly
-			// For this test, we'll import the helper directly
-
-			// Since we can't easily test this without mocking, we'll skip the actual API call
-			// and just verify the helper logic works correctly
-			const { streamAnthropic } = await import("../src/providers/anthropic.js");
 
 			try {
 				const s = streamAnthropic(proxyModel, context, {
@@ -107,6 +102,7 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 			}
 
 			expect(capturedPayload).not.toBeNull();
+			expect(capturedPayload.cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
 			expect(capturedPayload.system[0].cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
 		});
 
@@ -118,8 +114,6 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 				compat: { supportsLongCacheRetention: false },
 			};
 			let capturedPayload: any = null;
-
-			const { streamAnthropic } = await import("../src/providers/anthropic.js");
 
 			try {
 				const s = streamAnthropic(proxyModel, context, {
@@ -138,14 +132,13 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 			}
 
 			expect(capturedPayload).not.toBeNull();
+			expect(capturedPayload.cache_control).toEqual({ type: "ephemeral" });
 			expect(capturedPayload.system[0].cache_control).toEqual({ type: "ephemeral" });
 		});
 
 		it("should omit cache_control when cacheRetention is none", async () => {
 			const baseModel = getModel("anthropic", "claude-haiku-4-5");
 			let capturedPayload: any = null;
-
-			const { streamAnthropic } = await import("../src/providers/anthropic.js");
 
 			try {
 				const s = streamAnthropic(baseModel, context, {
@@ -164,14 +157,13 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 			}
 
 			expect(capturedPayload).not.toBeNull();
+			expect(capturedPayload.cache_control).toBeUndefined();
 			expect(capturedPayload.system[0].cache_control).toBeUndefined();
 		});
 
-		it("should add cache_control to string user messages", async () => {
+		it("should use top-level cache_control instead of marking user messages", async () => {
 			const baseModel = getModel("anthropic", "claude-haiku-4-5");
 			let capturedPayload: any = null;
-
-			const { streamAnthropic } = await import("../src/providers/anthropic.js");
 
 			try {
 				const s = streamAnthropic(baseModel, context, {
@@ -189,17 +181,14 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 			}
 
 			expect(capturedPayload).not.toBeNull();
+			expect(capturedPayload.cache_control).toEqual({ type: "ephemeral" });
 			const lastMessage = capturedPayload.messages[capturedPayload.messages.length - 1];
-			expect(Array.isArray(lastMessage.content)).toBe(true);
-			const lastBlock = lastMessage.content[lastMessage.content.length - 1];
-			expect(lastBlock.cache_control).toEqual({ type: "ephemeral" });
+			expect(lastMessage.content).toBe("Hello");
 		});
 
 		it("should set 1h cache TTL when cacheRetention is long", async () => {
 			const baseModel = getModel("anthropic", "claude-haiku-4-5");
 			let capturedPayload: any = null;
-
-			const { streamAnthropic } = await import("../src/providers/anthropic.js");
 
 			try {
 				const s = streamAnthropic(baseModel, context, {
@@ -218,7 +207,48 @@ describe("Cache Retention (PI_CACHE_RETENTION)", () => {
 			}
 
 			expect(capturedPayload).not.toBeNull();
+			expect(capturedPayload.cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
 			expect(capturedPayload.system[0].cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
+		});
+
+		it("should keep explicit cache_control on the last tool definition", async () => {
+			const baseModel = getModel("anthropic", "claude-haiku-4-5");
+			let capturedPayload: any = null;
+			const contextWithTool: Context = {
+				...context,
+				tools: [
+					{
+						name: "read",
+						description: "Read a file",
+						parameters: {
+							type: "object",
+							properties: {
+								path: { type: "string" },
+							},
+							required: ["path"],
+						},
+					},
+				],
+			};
+
+			try {
+				const s = streamAnthropic(baseModel, contextWithTool, {
+					apiKey: "fake-key",
+					onPayload: (payload) => {
+						capturedPayload = payload;
+					},
+				});
+
+				for await (const event of s) {
+					if (event.type === "error") break;
+				}
+			} catch {
+				// Expected to fail
+			}
+
+			expect(capturedPayload).not.toBeNull();
+			expect(capturedPayload.cache_control).toEqual({ type: "ephemeral" });
+			expect(capturedPayload.tools.at(-1).cache_control).toEqual({ type: "ephemeral" });
 		});
 	});
 
